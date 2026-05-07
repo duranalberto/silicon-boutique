@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silicon-boutique-mcp"
+version = "0.1.0"
+description = "Boundary scaffold for future SiliconBoutique MCP tools."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+silicon-boutique-mcp = "silicon_boutique_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

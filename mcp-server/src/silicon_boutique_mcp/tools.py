@@ -1,0 +1,154 @@
+"""MCP-shaped tool contracts and dependency-free operation functions."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+
+from silicon_boutique_mcp.boundary import BenchmarkHistoryStore, BenchmarkRunController
+from silicon_boutique_mcp.models import (
+    GetBenchmarkStatusResponse,
+    HistoricalMetricsQuery,
+    HistoricalMetricsResponse,
+    ToolDefinition,
+)
+
+
+DEFAULT_HISTORY_LIMIT = 10
+MAX_HISTORY_LIMIT = 100
+
+
+class ToolContractError(ValueError):
+    """Raised when a tool request does not satisfy the local contract."""
+
+
+GET_BENCHMARK_STATUS_TOOL = ToolDefinition(
+    name="get_benchmark_status",
+    description="Check benchmark status from run trace metadata.",
+    input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["run_id"],
+        "properties": {
+            "run_id": {"type": "string", "minLength": 1},
+        },
+    },
+    output_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["run_id", "status", "trace"],
+        "properties": {
+            "run_id": {"type": "string"},
+            "status": {
+                "type": "string",
+                "enum": ["queued", "running", "completed", "failed", "unknown"],
+            },
+            "trace": {"type": "object"},
+        },
+    },
+)
+
+QUERY_HISTORICAL_METRICS_TOOL = ToolDefinition(
+    name="query_historical_metrics",
+    description="Query stored benchmark summary rows by machine metadata.",
+    input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "machine_type": {"type": "string", "minLength": 1},
+            "processor_family": {"type": "string", "minLength": 1},
+            "architecture": {"type": "string", "minLength": 1},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": MAX_HISTORY_LIMIT,
+                "default": DEFAULT_HISTORY_LIMIT,
+            },
+        },
+    },
+    output_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["query", "results"],
+        "properties": {
+            "query": {"type": "object"},
+            "results": {"type": "array", "items": {"type": "object"}},
+        },
+    },
+)
+
+TOOL_DEFINITIONS = (
+    GET_BENCHMARK_STATUS_TOOL,
+    QUERY_HISTORICAL_METRICS_TOOL,
+)
+
+
+def tool_definitions_as_dicts() -> list[dict[str, object]]:
+    """Return all exposed P5.2 tool contracts as JSON-ready dictionaries."""
+    return [tool.to_dict() for tool in TOOL_DEFINITIONS]
+
+
+def get_benchmark_status(
+    run_id: str,
+    run_controller: BenchmarkRunController,
+) -> GetBenchmarkStatusResponse:
+    """Execute the status contract against a boundary run controller."""
+    cleaned_run_id = require_non_empty_string(run_id, "run_id")
+    trace = run_controller.get_benchmark_status(cleaned_run_id)
+    return GetBenchmarkStatusResponse(
+        run_id=cleaned_run_id,
+        status=trace.status,
+        trace=trace,
+    )
+
+
+def query_historical_metrics(
+    query: HistoricalMetricsQuery,
+    history_store: BenchmarkHistoryStore,
+) -> HistoricalMetricsResponse:
+    """Execute the historical query contract against a boundary history store."""
+    validate_history_query(query)
+    rows = history_store.query_historical_metrics(
+        machine_type=clean_optional_string(query.machine_type, "machine_type"),
+        processor_family=clean_optional_string(
+            query.processor_family,
+            "processor_family",
+        ),
+        architecture=clean_optional_string(query.architecture, "architecture"),
+        limit=query.limit,
+    )
+    return HistoricalMetricsResponse(query=query, results=tuple(rows))
+
+
+def response_to_dict(response: object) -> dict[str, object]:
+    """Render dataclass operation responses as JSON-ready dictionaries."""
+    if hasattr(response, "to_dict"):
+        return response.to_dict()  # type: ignore[no-any-return]
+    return asdict(response)  # type: ignore[arg-type]
+
+
+def validate_history_query(query: HistoricalMetricsQuery) -> None:
+    clean_optional_string(query.machine_type, "machine_type")
+    clean_optional_string(query.processor_family, "processor_family")
+    clean_optional_string(query.architecture, "architecture")
+    if not isinstance(query.limit, int):
+        raise ToolContractError("limit must be an integer")
+    if query.limit < 1 or query.limit > MAX_HISTORY_LIMIT:
+        raise ToolContractError(
+            f"limit must be between 1 and {MAX_HISTORY_LIMIT}; got {query.limit}"
+        )
+
+
+def require_non_empty_string(value: str, field_name: str) -> str:
+    cleaned = value.strip() if isinstance(value, str) else ""
+    if not cleaned:
+        raise ToolContractError(f"{field_name} must be a non-empty string")
+    return cleaned
+
+
+def clean_optional_string(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        raise ToolContractError(f"{field_name} must be a non-empty string when set")
+    return cleaned

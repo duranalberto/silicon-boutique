@@ -299,6 +299,31 @@ Use `failure_stage=after_provision`, `failure_stage=after_monitoring_ready`, or 
 
 Normal GitHub workflow cancellation should still allow `if: always()` cleanup to continue. Force-cancel behavior that bypasses those conditions cannot be fully guaranteed by workflow YAML alone, so inspect GCP for run-scoped resources if a run is force-canceled.
 
+## MCP Boundary Validation
+
+The Phase 5 boundary scaffold lives in `mcp-server/`. It is intentionally dependency-light and exposes fixture-testable contracts without implementing GitHub Actions dispatch, BigQuery queries, or real MCP SDK handlers yet.
+
+Validate the package entry point, tool contracts, and boundary isolation with:
+
+```bash
+PYTHONPATH=mcp-server/src python3 -m unittest discover -s mcp-server/tests
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --manifest
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --tools
+```
+
+Exercise status and historical queries against local artifacts or fixtures:
+
+```bash
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp status \
+  --run-id "$run_id" \
+  --trace-fixture artifacts/workflow-trace.json
+
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp history \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --machine-type "$machine_type" \
+  --limit 10
+```
+
 ## GCP Terraform Validation
 
 The GCP rollout path provisions a dedicated VPC, subnet, GKE cluster, and benchmark node pool. Routine checks should stay bounded and should not create cloud resources.
