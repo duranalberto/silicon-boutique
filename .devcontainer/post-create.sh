@@ -4,48 +4,93 @@ set -euo pipefail
 PROFILE="${MINIKUBE_PROFILE:-siliconboutique}"
 DRIVER="${MINIKUBE_DRIVER:-docker}"
 START_TIMEOUT="${MINIKUBE_START_TIMEOUT:-10m}"
-required_tools=(terraform kubectl helm python3 minikube docker)
+STATUS_TIMEOUT="${MINIKUBE_STATUS_TIMEOUT:-30s}"
+KUBERNETES_VERSION="${MINIKUBE_KUBERNETES_VERSION:-v1.35.1}"
+BASE_IMAGE="${MINIKUBE_BASE_IMAGE:-docker.io/kicbase/stable:v0.0.50}"
+LISTEN_ADDRESS="${MINIKUBE_LISTEN_ADDRESS:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+START_OUTPUT_FILE=""
 
-start_profile() {
-  echo "Starting local minikube profile '$PROFILE' with driver '$DRIVER'..."
-  if timeout "$START_TIMEOUT" minikube start --driver="$DRIVER" --profile="$PROFILE"; then
-    return 0
-  else
-    start_status=$?
-    if [ "$start_status" -eq 124 ]; then
-      echo "Timed out after $START_TIMEOUT while starting minikube profile '$PROFILE'." >&2
-    fi
-    return "$start_status"
+cleanup() {
+  if [ -n "$START_OUTPUT_FILE" ]; then
+    rm -f "$START_OUTPUT_FILE"
   fi
 }
 
-for tool in "${required_tools[@]}"; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Missing required tool: $tool" >&2
-    exit 1
-  fi
-done
+trap cleanup EXIT
 
-if ! docker info >/dev/null 2>&1; then
-  cat >&2 <<'EOF'
-Docker is not reachable from this devcontainer.
-Make sure the Docker socket is mounted and the docker-outside-of-docker feature can talk to the host daemon.
-EOF
-  exit 1
+start_profile() {
+  local start_args
+  local start_status
+
+  cleanup
+  START_OUTPUT_FILE="$(mktemp)"
+  echo "Starting local minikube profile '$PROFILE' with driver '$DRIVER'..."
+  start_args=(--driver="$DRIVER" --profile="$PROFILE")
+  if [ -n "$KUBERNETES_VERSION" ]; then
+    start_args+=(--kubernetes-version="$KUBERNETES_VERSION")
+  fi
+  if [ -n "$BASE_IMAGE" ]; then
+    start_args+=(--base-image="$BASE_IMAGE")
+  fi
+  if [ -n "$LISTEN_ADDRESS" ]; then
+    start_args+=(--listen-address="$LISTEN_ADDRESS")
+  fi
+
+  set +e
+  timeout "$START_TIMEOUT" minikube start "${start_args[@]}" 2>&1 | tee "$START_OUTPUT_FILE"
+  start_status="${PIPESTATUS[0]}"
+  set -e
+
+  if [ "$start_status" -eq 0 ]; then
+    return 0
+  fi
+
+  if [ "$start_status" -eq 124 ]; then
+    echo "Timed out after $START_TIMEOUT while starting minikube profile '$PROFILE'." >&2
+  fi
+
+  return "$start_status"
+}
+
+profile_status() {
+  timeout "$STATUS_TIMEOUT" minikube status --profile="$PROFILE" 2>&1
+}
+
+has_unreadable_config() {
+  grep -Eqi 'HOST_CONFIG_LOAD|Unable to load config|Error getting cluster config|unmarshal'
+}
+
+"$SCRIPT_DIR/verify-toolchain.sh"
+
+PROFILE_CONFIG="$HOME/.minikube/profiles/$PROFILE/config.json"
+if [ -f "$PROFILE_CONFIG" ]; then
+  configured_driver="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("Driver", ""))' "$PROFILE_CONFIG")"
+  configured_kubernetes="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("KubernetesConfig", {}).get("KubernetesVersion", ""))' "$PROFILE_CONFIG")"
+  configured_base_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("KicBaseImage", ""))' "$PROFILE_CONFIG")"
+  configured_listen_address="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ListenAddress", ""))' "$PROFILE_CONFIG")"
+
+  if [ "$configured_driver" != "$DRIVER" ] \
+    || { [ -n "$KUBERNETES_VERSION" ] && [ "$configured_kubernetes" != "$KUBERNETES_VERSION" ]; } \
+    || { [ -n "$BASE_IMAGE" ] && [ "$configured_base_image" != "$BASE_IMAGE" ]; } \
+    || [ "$configured_listen_address" != "$LISTEN_ADDRESS" ]; then
+    echo "Local minikube profile '$PROFILE' does not match the devcontainer baseline."
+    echo "Deleting and recreating only the '$PROFILE' profile..."
+    minikube delete --profile="$PROFILE" || true
+  fi
 fi
 
-if minikube status --profile="$PROFILE" >/dev/null 2>&1; then
+if profile_status >/dev/null; then
   echo "Local minikube profile '$PROFILE' is already available."
 else
-  status_output="$(minikube status --profile="$PROFILE" 2>&1 || true)"
-  if grep -Eqi 'HOST_CONFIG_LOAD|Unable to load config|Error getting cluster config|unmarshal' <<<"$status_output"; then
+  status_output="$(profile_status || true)"
+  if has_unreadable_config <<<"$status_output"; then
     echo "Local minikube profile '$PROFILE' has an unreadable config."
     echo "Deleting and recreating only the '$PROFILE' profile..."
     minikube delete --profile="$PROFILE" || true
     start_profile
-  elif ! start_output="$(start_profile 2>&1)"; then
-    printf '%s\n' "$start_output" >&2
-    if grep -Eqi 'HOST_CONFIG_LOAD|Unable to load config|Error getting cluster config|unmarshal' <<<"$start_output"; then
+  elif ! start_profile; then
+    if has_unreadable_config <"$START_OUTPUT_FILE"; then
       echo "Local minikube profile '$PROFILE' has an unreadable config."
       echo "Deleting and recreating only the '$PROFILE' profile..."
       minikube delete --profile="$PROFILE" || true
@@ -53,8 +98,6 @@ else
     else
       exit 1
     fi
-  else
-    printf '%s\n' "$start_output"
   fi
 fi
 

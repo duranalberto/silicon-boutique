@@ -3,10 +3,31 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
+  "runArgs": [
+    "--network=host"
+  ],
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1.6.5": {},
-    "ghcr.io/devcontainers/features/terraform:1": {},
-    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {}
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "1.15.2"
+    },
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "version": "1.36.0",
+      "helm": "4.1.4",
+      "minikube": "1.38.1"
+    }
+  },
+  "containerEnv": {
+    "MINIKUBE_PROFILE": "siliconboutique",
+    "MINIKUBE_DRIVER": "docker",
+    "MINIKUBE_START_TIMEOUT": "10m",
+    "MINIKUBE_STATUS_TIMEOUT": "30s",
+    "MINIKUBE_KUBERNETES_VERSION": "v1.35.1",
+    "MINIKUBE_BASE_IMAGE": "docker.io/kicbase/stable:v0.0.50",
+    "EXPECTED_TERRAFORM_VERSION": "1.15.2",
+    "EXPECTED_KUBECTL_VERSION": "1.36.0",
+    "EXPECTED_HELM_VERSION": "4.1.4",
+    "EXPECTED_MINIKUBE_VERSION": "1.38.1"
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "customizations": {
