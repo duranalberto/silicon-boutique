@@ -1,0 +1,733 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: GCP project ID for the ephemeral benchmark resources.
+        required: true
+        type: string
+      region:
+        description: GCP region for regional resources.
+        required: true
+        default: us-central1
+        type: string
+      zone:
+        description: GCP zone for the GKE cluster.
+        required: true
+        default: us-central1-a
+        type: string
+      machine_type:
+        description: GCE machine type for the benchmark node pool.
+        required: true
+        default: e2-standard-4
+        type: string
+      node_count:
+        description: Number of GKE benchmark nodes.
+        required: true
+        default: "1"
+        type: string
+      processor_family:
+        description: Processor family label for summary comparison.
+        required: true
+        default: e2
+        type: string
+      architecture:
+        description: Processor architecture label for summary comparison.
+        required: true
+        default: x86_64
+        type: choice
+        options:
+          - x86_64
+          - arm64
+      concurrent_users:
+        description: Load generator concurrent user count.
+        required: true
+        default: "10"
+        type: string
+      users_per_second:
+        description: Load generator users spawned per second.
+        required: true
+        default: "1"
+        type: string
+      test_duration:
+        description: Benchmark duration as seconds, Nm, or Nh.
+        required: true
+        default: 20m
+        type: string
+      failure_stage:
+        description: Optional controlled failure point for teardown validation.
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - after_provision
+          - after_monitoring_ready
+          - before_extract
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: GCP benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      run_id: ${{ steps.traceability.outputs.run_id }}
+      environment: ${{ steps.traceability.outputs.environment }}
+      cloud_provider: ${{ steps.traceability.outputs.cloud_provider }}
+      project_id: ${{ steps.traceability.outputs.project_id }}
+      region: ${{ steps.traceability.outputs.region }}
+      zone: ${{ steps.traceability.outputs.zone }}
+      machine_type: ${{ steps.traceability.outputs.machine_type }}
+      processor_family: ${{ steps.traceability.outputs.processor_family }}
+      architecture: ${{ steps.traceability.outputs.architecture }}
+      namespace: ${{ steps.traceability.outputs.namespace }}
+      benchmark_start: ${{ steps.traceability.outputs.benchmark_start }}
+      benchmark_end: ${{ steps.traceability.outputs.benchmark_end }}
+      summary_artifact_name: ${{ steps.traceability.outputs.summary_artifact_name }}
+      summary_path: ${{ steps.traceability.outputs.summary_path }}
+      summary_store_path: ${{ steps.traceability.outputs.summary_store_path }}
+      teardown_succeeded: ${{ steps.traceability.outputs.teardown_succeeded }}
+      destroy_attempted: ${{ steps.traceability.outputs.destroy_attempted }}
+      failure_stage: ${{ steps.traceability.outputs.failure_stage }}
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+      TERRAFORM_DIR: infra/terraform/gcp-gke
+      WORKLOAD_RELEASE: silicon-boutique-online-boutique
+      MONITORING_RELEASE: sb-monitoring
+      WORKLOAD_CHART: k8s/charts/silicon-boutique-online-boutique
+      MONITORING_CHART: k8s/charts/silicon-boutique-monitoring
+      ARTIFACTS_DIR: artifacts
+      PROJECT_ID: ${{ inputs.project_id }}
+      REGION: ${{ inputs.region }}
+      ZONE: ${{ inputs.zone }}
+      MACHINE_TYPE: ${{ inputs.machine_type }}
+      NODE_COUNT: ${{ inputs.node_count }}
+      PROCESSOR_FAMILY: ${{ inputs.processor_family }}
+      ARCHITECTURE: ${{ inputs.architecture }}
+      CONCURRENT_USERS: ${{ inputs.concurrent_users }}
+      USERS_PER_SECOND: ${{ inputs.users_per_second }}
+      TEST_DURATION: ${{ inputs.test_duration }}
+      FAILURE_STAGE: ${{ inputs.failure_stage }}
+      SUMMARY_ARTIFACT_NAME: benchmark-gha-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Prepare run metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_id="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ ! "$run_id" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || [[ ${#run_id} -gt 30 ]]; then
+            echo "Generated run_id is not Terraform-compatible: $run_id" >&2
+            exit 1
+          fi
+
+          case "$TEST_DURATION" in
+            *m)
+              duration_seconds="${TEST_DURATION%m}"
+              duration_seconds=$((duration_seconds * 60))
+              ;;
+            *h)
+              duration_seconds="${TEST_DURATION%h}"
+              duration_seconds=$((duration_seconds * 3600))
+              ;;
+            *s)
+              duration_seconds="${TEST_DURATION%s}"
+              ;;
+            *)
+              duration_seconds="$TEST_DURATION"
+              ;;
+          esac
+
+          if [[ ! "$duration_seconds" =~ ^[0-9]+$ ]] || [[ "$duration_seconds" -le 0 ]]; then
+            echo "test_duration must be a positive number of seconds, Nm, or Nh. Got: $TEST_DURATION" >&2
+            exit 1
+          fi
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "RUN_ID=$run_id"
+            echo "NAMESPACE=$run_id"
+            echo "TEST_DURATION_SECONDS=$duration_seconds"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize Terraform
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform init -input=false
+
+      - name: Validate Terraform
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform validate
+
+      - name: Provision GKE benchmark environment
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set -o pipefail
+
+          mkdir -p "$GITHUB_WORKSPACE/$ARTIFACTS_DIR"
+          {
+            echo "apply_started=true"
+            echo "run_id=$RUN_ID"
+            echo "project_id=$PROJECT_ID"
+            echo "region=$REGION"
+            echo "zone=$ZONE"
+          } > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env"
+
+          set +e
+          terraform apply -auto-approve \
+            -var="project_id=$PROJECT_ID" \
+            -var="static_validation_mode=false" \
+            -var="run_id=$RUN_ID" \
+            -var="region=$REGION" \
+            -var="zone=$ZONE" \
+            -var="machine_type=$MACHINE_TYPE" \
+            -var="node_count=$NODE_COUNT" \
+            -var="processor_family=$PROCESSOR_FAMILY" \
+            -var="architecture=$ARCHITECTURE"
+          apply_exit_code="$?"
+          set -e
+
+          {
+            echo "apply_exit_code=$apply_exit_code"
+            echo "apply_succeeded=$([[ "$apply_exit_code" -eq 0 ]] && echo true || echo false)"
+          } >> "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env"
+
+          exit "$apply_exit_code"
+
+      - name: Inject failure after provisioning
+        if: ${{ inputs.failure_stage == 'after_provision' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=after_provision." >&2
+          exit 42
+
+      - name: Capture Terraform outputs
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "RUN_ID=$(terraform output -raw run_id)"
+            echo "ENVIRONMENT=$(terraform output -raw environment)"
+            echo "MACHINE_TYPE=$(terraform output -raw machine_type)"
+            echo "PROCESSOR_FAMILY=$(terraform output -raw processor_family)"
+            echo "ARCHITECTURE=$(terraform output -raw architecture)"
+            echo "GET_CREDENTIALS_COMMAND=$(terraform output -raw get_credentials_command)"
+          } >> "$GITHUB_ENV"
+
+          terraform output -json managed_resource_names > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/managed-resource-names.json"
+          terraform output -json labels > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/terraform-labels.json"
+          terraform output -json teardown_check_commands > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-check-commands.json"
+
+      - name: Configure kubectl for GKE
+        run: timeout 5m bash -c "$GET_CREDENTIALS_COMMAND"
+
+      - name: Install Helm post-renderer plugin
+        run: |
+          helm plugin list | awk 'NR > 1 {print $1}' | grep -qx silicon-boutique-metadata \
+            || helm plugin install "$WORKLOAD_CHART/post-renderer"
+
+      - name: Deploy workload chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm dependency update "$WORKLOAD_CHART"
+          helm lint "$WORKLOAD_CHART"
+          helm upgrade --install "$WORKLOAD_RELEASE" "./$WORKLOAD_CHART" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --set-string siliconBoutique.runId="$RUN_ID" \
+            --set-string siliconBoutique.environment="$ENVIRONMENT" \
+            --set-string siliconBoutique.machineType="$MACHINE_TYPE" \
+            --set-string siliconBoutique.processorFamily="$PROCESSOR_FAMILY" \
+            --set-string siliconBoutique.architecture="$ARCHITECTURE" \
+            --set siliconBoutique.loadGenerator.concurrentUsers="$CONCURRENT_USERS" \
+            --set siliconBoutique.loadGenerator.usersPerSecond="$USERS_PER_SECOND" \
+            --set-string siliconBoutique.loadGenerator.testDuration="$TEST_DURATION" \
+            --post-renderer silicon-boutique-metadata
+
+      - name: Wait for workload readiness
+        run: |
+          kubectl wait deployment --all \
+            --for=condition=Available \
+            --timeout=10m \
+            --namespace "$NAMESPACE"
+
+      - name: Deploy monitoring chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm dependency update "$MONITORING_CHART"
+          helm lint "$MONITORING_CHART"
+          helm upgrade --install "$MONITORING_RELEASE" "./$MONITORING_CHART" \
+            --namespace "$NAMESPACE" \
+            --set-string siliconBoutique.runId="$RUN_ID" \
+            --set-string siliconBoutique.environment="$ENVIRONMENT" \
+            --set-string siliconBoutique.machineType="$MACHINE_TYPE" \
+            --set-string siliconBoutique.processorFamily="$PROCESSOR_FAMILY" \
+            --set-string siliconBoutique.architecture="$ARCHITECTURE" \
+            --set-string siliconBoutique.workloadNamespace="$NAMESPACE"
+
+      - name: Wait for monitoring readiness
+        run: |
+          kubectl rollout status deployment/sb-monitoring-kube-state-metrics \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl rollout status deployment/sb-monitoring-prometheus-blackbox-exporter \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl rollout status daemonset/sb-monitoring-prometheus-node-exporter \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl wait pod \
+            --for=condition=Ready \
+            --selector app.kubernetes.io/name=prometheus \
+            --timeout=10m \
+            --namespace "$NAMESPACE"
+
+      - name: Inject failure after monitoring readiness
+        if: ${{ inputs.failure_stage == 'after_monitoring_ready' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=after_monitoring_ready." >&2
+          exit 42
+
+      - name: Start benchmark load generator
+        run: |
+          kubectl rollout restart deployment/loadgenerator --namespace "$NAMESPACE"
+          kubectl rollout status deployment/loadgenerator \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+
+      - name: Run benchmark window
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          benchmark_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sleep "$TEST_DURATION_SECONDS"
+          benchmark_end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          {
+            echo "BENCHMARK_START=$benchmark_start"
+            echo "BENCHMARK_END=$benchmark_end"
+          } >> "$GITHUB_ENV"
+
+      - name: Inject failure before extraction
+        if: ${{ inputs.failure_stage == 'before_extract' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=before_extract." >&2
+          exit 42
+
+      - name: Extract Prometheus metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl port-forward service/sb-monitoring-kube-prometh-prometheus \
+            9090:9090 \
+            --namespace "$NAMESPACE" &
+          port_forward_pid="$!"
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:9090/-/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:9090/-/ready >/dev/null
+
+          python3 automation/scripts/extract_prometheus_metrics.py \
+            --prometheus-url http://127.0.0.1:9090 \
+            --run-id "$RUN_ID" \
+            --namespace "$NAMESPACE" \
+            --start "$BENCHMARK_START" \
+            --end "$BENCHMARK_END" \
+            --step 15s \
+            --output "$ARTIFACTS_DIR/prometheus-metrics.json" \
+            --strict
+
+      - name: Generate benchmark summary
+        run: |
+          python3 automation/scripts/generate_benchmark_summary.py \
+            --metrics-input "$ARTIFACTS_DIR/prometheus-metrics.json" \
+            --summary-output "$ARTIFACTS_DIR/benchmark-summary.json" \
+            --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
+            --environment "$ENVIRONMENT" \
+            --machine-type "$MACHINE_TYPE" \
+            --processor-family "$PROCESSOR_FAMILY" \
+            --architecture "$ARCHITECTURE" \
+            --cloud-provider gcp \
+            --strict
+
+      - name: Validate benchmark comparability
+        run: |
+          python3 automation/scripts/validate_benchmark_comparability.py \
+            --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
+            --schema automation/templates/benchmark-summary.schema.json \
+            --report-output "$ARTIFACTS_DIR/comparability-report.json" \
+            --min-duration-seconds 1200 \
+            --min-coverage-ratio 0.95 \
+            --strict
+
+      - name: Capture teardown precheck
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "teardown_precheck_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "namespace=${NAMESPACE:-}"
+            echo "project_id=${PROJECT_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo
+          } > "$ARTIFACTS_DIR/teardown-precheck.txt"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; no run-scoped GCP teardown precheck is required." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+            exit 0
+          fi
+
+          if [[ -n "${GET_CREDENTIALS_COMMAND:-}" ]]; then
+            timeout 5m bash -c "$GET_CREDENTIALS_COMMAND" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "GET_CREDENTIALS_COMMAND is unavailable; skipping kubeconfig refresh." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+          if [[ -n "${NAMESPACE:-}" ]] && kubectl version --client >/dev/null 2>&1; then
+            timeout 2m kubectl get namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            timeout 2m kubectl get pods,services --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "Namespace or kubectl is unavailable; skipping Kubernetes precheck." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+          if command -v gcloud >/dev/null 2>&1 && [[ -n "${PROJECT_ID:-}" ]] && [[ -n "${RUN_ID:-}" ]]; then
+            timeout 2m gcloud container clusters list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            timeout 2m gcloud compute networks list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID-vpc" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            timeout 2m gcloud compute networks subnets list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID-subnet AND region=$REGION" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "gcloud, project ID, or run ID is unavailable; skipping GCP precheck." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+      - name: Uninstall Helm releases
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "helm_cleanup_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "namespace=${NAMESPACE:-}"
+            echo
+          } > "$ARTIFACTS_DIR/helm-cleanup.log"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; skipping Helm cleanup." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          if [[ -z "${NAMESPACE:-}" ]]; then
+            echo "NAMESPACE is unavailable; skipping Helm cleanup." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          if [[ -n "${GET_CREDENTIALS_COMMAND:-}" ]]; then
+            timeout 5m bash -c "$GET_CREDENTIALS_COMMAND" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1
+          else
+            echo "GET_CREDENTIALS_COMMAND is unavailable; attempting cleanup with current kubeconfig." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+          fi
+
+          if ! kubectl get namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1; then
+            echo "Benchmark namespace is unavailable; skipping Helm uninstall." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          timeout 5m helm uninstall "$MONITORING_RELEASE" --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1 || true
+          timeout 5m helm uninstall "$WORKLOAD_RELEASE" --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1 || true
+
+      - name: Destroy GKE benchmark environment
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$GITHUB_WORKSPACE/$ARTIFACTS_DIR"
+          teardown_status="$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-status.env"
+          teardown_log="$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-destroy.log"
+
+          {
+            echo "destroy_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "project_id=${PROJECT_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo
+          } > "$teardown_log"
+
+          if [[ ! -f "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; skipping destroy." >> "$teardown_log"
+            {
+              echo "destroy_attempted=false"
+              echo "destroy_exit_code=0"
+              echo "destroy_succeeded=true"
+              echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > "$teardown_status"
+            exit 0
+          fi
+
+          if [[ -z "${RUN_ID:-}" ]]; then
+            echo "RUN_ID is unavailable; refusing to run Terraform destroy without a run scope." >> "$teardown_log"
+            {
+              echo "destroy_attempted=false"
+              echo "destroy_exit_code=2"
+              echo "destroy_succeeded=false"
+              echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > "$teardown_status"
+            exit 2
+          fi
+
+          timeout 30m terraform destroy -auto-approve \
+            -var="project_id=$PROJECT_ID" \
+            -var="static_validation_mode=false" \
+            -var="run_id=$RUN_ID" \
+            -var="region=$REGION" \
+            -var="zone=$ZONE" \
+            -var="machine_type=$MACHINE_TYPE" \
+            -var="node_count=$NODE_COUNT" \
+            -var="processor_family=$PROCESSOR_FAMILY" \
+            -var="architecture=$ARCHITECTURE" >> "$teardown_log" 2>&1
+          destroy_exit_code="$?"
+
+          {
+            echo "destroy_attempted=true"
+            echo "destroy_exit_code=$destroy_exit_code"
+            echo "destroy_succeeded=$([[ "$destroy_exit_code" -eq 0 ]] && echo true || echo false)"
+            echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$teardown_status"
+
+          exit "$destroy_exit_code"
+
+      - name: Capture teardown postcheck
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "teardown_postcheck_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "project_id=${PROJECT_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo
+          } > "$ARTIFACTS_DIR/teardown-postcheck.txt"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; no run-scoped GCP teardown postcheck is required." >> "$ARTIFACTS_DIR/teardown-postcheck.txt"
+            exit 0
+          fi
+
+          if command -v gcloud >/dev/null 2>&1 && [[ -n "${PROJECT_ID:-}" ]] && [[ -n "${RUN_ID:-}" ]]; then
+            timeout 2m gcloud container clusters list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+            timeout 2m gcloud compute networks list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID-vpc" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+            timeout 2m gcloud compute networks subnets list --project "$PROJECT_ID" --filter="name=sb-$RUN_ID-subnet AND region=$REGION" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+          else
+            echo "gcloud, project ID, or run ID is unavailable; skipping GCP postcheck." >> "$ARTIFACTS_DIR/teardown-postcheck.txt"
+          fi
+
+      - name: Capture workflow traceability outputs
+        id: traceability
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$ARTIFACTS_DIR"
+          summary_path="$ARTIFACTS_DIR/benchmark-summary.json"
+          summary_store_path="$ARTIFACTS_DIR/benchmark-summaries.ndjson"
+          trace_path="$ARTIFACTS_DIR/workflow-trace.json"
+          trace_env_path="$ARTIFACTS_DIR/workflow-trace.env"
+          destroy_attempted="unknown"
+          destroy_succeeded="unknown"
+
+          if [[ -f "$ARTIFACTS_DIR/teardown-status.env" ]]; then
+            # shellcheck disable=SC1090
+            source "$ARTIFACTS_DIR/teardown-status.env"
+            destroy_attempted="${destroy_attempted:-unknown}"
+            destroy_succeeded="${destroy_succeeded:-unknown}"
+          fi
+
+          environment="${ENVIRONMENT:-gcp}"
+          cloud_provider="gcp"
+          benchmark_start="${BENCHMARK_START:-}"
+          benchmark_end="${BENCHMARK_END:-}"
+          export TRACE_ENVIRONMENT="$environment"
+          export TRACE_CLOUD_PROVIDER="$cloud_provider"
+          export TRACE_BENCHMARK_START="$benchmark_start"
+          export TRACE_BENCHMARK_END="$benchmark_end"
+          export TRACE_DESTROY_ATTEMPTED="$destroy_attempted"
+          export TRACE_DESTROY_SUCCEEDED="$destroy_succeeded"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          artifacts_dir = Path(os.environ["ARTIFACTS_DIR"])
+          summary_path = artifacts_dir / "benchmark-summary.json"
+          summary_store_path = artifacts_dir / "benchmark-summaries.ndjson"
+          trace_path = artifacts_dir / "workflow-trace.json"
+          trace = {
+              "github": {
+                  "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
+                  "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+                  "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+                  "ref": os.environ.get("GITHUB_REF", ""),
+                  "sha": os.environ.get("GITHUB_SHA", ""),
+              },
+              "benchmark": {
+                  "run_id": os.environ.get("RUN_ID", ""),
+                  "environment": os.environ.get("TRACE_ENVIRONMENT", ""),
+                  "cloud_provider": os.environ.get("TRACE_CLOUD_PROVIDER", ""),
+                  "namespace": os.environ.get("NAMESPACE", ""),
+                  "machine_type": os.environ.get("MACHINE_TYPE", ""),
+                  "processor_family": os.environ.get("PROCESSOR_FAMILY", ""),
+                  "architecture": os.environ.get("ARCHITECTURE", ""),
+                  "benchmark_start": os.environ.get("TRACE_BENCHMARK_START", ""),
+                  "benchmark_end": os.environ.get("TRACE_BENCHMARK_END", ""),
+              },
+              "gcp": {
+                  "project_id": os.environ.get("PROJECT_ID", ""),
+                  "region": os.environ.get("REGION", ""),
+                  "zone": os.environ.get("ZONE", ""),
+              },
+              "artifacts": {
+                  "artifact_name": os.environ.get("SUMMARY_ARTIFACT_NAME", ""),
+                  "summary_path": str(summary_path),
+                  "summary_store_path": str(summary_store_path),
+                  "trace_path": str(trace_path),
+                  "summary_exists": str(summary_path.exists()).lower(),
+                  "summary_store_exists": str(summary_store_path.exists()).lower(),
+              },
+              "teardown": {
+                  "destroy_attempted": os.environ.get("TRACE_DESTROY_ATTEMPTED", ""),
+                  "destroy_succeeded": os.environ.get("TRACE_DESTROY_SUCCEEDED", ""),
+              },
+              "inputs": {
+                  "failure_stage": os.environ.get("FAILURE_STAGE", ""),
+              },
+          }
+          trace_path.write_text(json.dumps(trace, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+          {
+            echo "run_id=${RUN_ID:-}"
+            echo "environment=$environment"
+            echo "cloud_provider=$cloud_provider"
+            echo "project_id=${PROJECT_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo "machine_type=${MACHINE_TYPE:-}"
+            echo "processor_family=${PROCESSOR_FAMILY:-}"
+            echo "architecture=${ARCHITECTURE:-}"
+            echo "namespace=${NAMESPACE:-}"
+            echo "benchmark_start=$benchmark_start"
+            echo "benchmark_end=$benchmark_end"
+            echo "summary_artifact_name=$SUMMARY_ARTIFACT_NAME"
+            echo "summary_path=$summary_path"
+            echo "summary_store_path=$summary_store_path"
+            echo "trace_path=$trace_path"
+            echo "teardown_succeeded=$destroy_succeeded"
+            echo "destroy_attempted=$destroy_attempted"
+            echo "failure_stage=${FAILURE_STAGE:-}"
+          } > "$trace_env_path"
+
+          cat "$trace_env_path" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Benchmark Traceability"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| run_id | \`${RUN_ID:-}\` |"
+            echo "| artifact | \`$SUMMARY_ARTIFACT_NAME\` |"
+            echo "| machine_type | \`${MACHINE_TYPE:-}\` |"
+            echo "| processor_family | \`${PROCESSOR_FAMILY:-}\` |"
+            echo "| architecture | \`${ARCHITECTURE:-}\` |"
+            echo "| benchmark_start | \`$benchmark_start\` |"
+            echo "| benchmark_end | \`$benchmark_end\` |"
+            echo "| summary_path | \`$summary_path\` |"
+            echo "| teardown_succeeded | \`$destroy_succeeded\` |"
+            echo "| failure_stage | \`${FAILURE_STAGE:-}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SUMMARY_ARTIFACT_NAME }}
+          path: artifacts/
+          if-no-files-found: warn
+
+      - name: Verify teardown status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "$ARTIFACTS_DIR/teardown-status.env" ]]; then
+            echo "Missing teardown status artifact; cleanup did not reach the Terraform destroy step." >&2
+            exit 1
+          fi
+
+          # shellcheck disable=SC1090
+          source "$ARTIFACTS_DIR/teardown-status.env"
+          if [[ "${destroy_succeeded:-false}" != "true" ]]; then
+            echo "Terraform destroy failed or was refused; inspect artifacts/teardown-destroy.log." >&2
+            exit 1
+          fi

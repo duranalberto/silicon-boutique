@@ -241,6 +241,64 @@ terraform destroy -auto-approve
 3. Run the same deployment and benchmark flow used in local Kubernetes.
 4. Preserve teardown discipline to avoid leaving cloud resources running.
 
+## GitHub Actions Benchmark Workflow
+
+The Phase 4 workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch` so future MCP tooling can trigger the same orchestration boundary through the GitHub Actions API.
+
+Before dispatching the workflow, configure GitHub OIDC for GCP and provide these repository or environment secrets:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+
+Dispatch inputs include:
+
+- `project_id`, `region`, and `zone`
+- `machine_type`, `node_count`, `processor_family`, and `architecture`
+- `concurrent_users`, `users_per_second`, and `test_duration`
+- `failure_stage`, which defaults to `none`
+
+The workflow derives a DNS-safe `run_id` as `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`. That identifier is passed into Terraform, Helm metadata, metric extraction, and summary generation.
+
+The job runs the standard benchmark sequence:
+
+1. Provision the GKE benchmark environment from `infra/terraform/gcp-gke`.
+2. Configure `kubectl` with the Terraform `get_credentials_command` output.
+3. Deploy `k8s/charts/silicon-boutique-online-boutique`.
+4. Deploy `k8s/charts/silicon-boutique-monitoring`.
+5. Restart `deployment/loadgenerator` so the measured run starts after monitoring is ready.
+6. Sleep for the configured benchmark window.
+7. Port-forward Prometheus and run `automation/scripts/extract_prometheus_metrics.py`.
+8. Run `automation/scripts/generate_benchmark_summary.py`.
+9. Run `automation/scripts/validate_benchmark_comparability.py`.
+10. Uninstall Helm releases and destroy Terraform-managed GCP resources.
+11. Capture traceability outputs.
+12. Upload the generated benchmark artifacts.
+
+The uploaded artifact is named `benchmark-gha-<github-run-id>-<attempt>` and should contain Prometheus metrics, the canonical summary JSON, the local BigQuery-ready NDJSON row, the comparability report, and Terraform metadata snapshots for managed resources and teardown checks.
+
+P4.2 guarantees a teardown attempt after Terraform provisioning starts. Terraform apply and destroy remain in the same job so local Terraform state is available to cleanup. Cleanup steps use `if: always()`, Helm uninstall is best-effort and bounded, Terraform destroy is bounded, and the final workflow step fails the job when destroy fails or is refused.
+
+The artifact also includes teardown evidence:
+
+- `provision-status.env`
+- `helm-cleanup.log`
+- `teardown-precheck.txt`
+- `teardown-destroy.log`
+- `teardown-postcheck.txt`
+- `teardown-status.env`
+
+P4.3 adds traceability outputs for downstream GitHub workflow use and future MCP integration. The benchmark job exposes non-secret outputs for `run_id`, environment, GCP location, machine metadata, benchmark window, summary artifact paths, teardown status, and `failure_stage`.
+
+The same trace data is available in three places after a run:
+
+- the benchmark job outputs
+- the GitHub step summary table
+- `workflow-trace.json` and `workflow-trace.env` in the uploaded artifact
+
+Use `failure_stage=after_provision`, `failure_stage=after_monitoring_ready`, or `failure_stage=before_extract` only in branch validation to force a controlled failure and verify cleanup still runs. Use `failure_stage=none` for normal benchmark runs.
+
+Normal GitHub workflow cancellation should still allow `if: always()` cleanup to continue. Force-cancel behavior that bypasses those conditions cannot be fully guaranteed by workflow YAML alone, so inspect GCP for run-scoped resources if a run is force-canceled.
+
 ## GCP Terraform Validation
 
 The GCP rollout path provisions a dedicated VPC, subnet, GKE cluster, and benchmark node pool. Routine checks should stay bounded and should not create cloud resources.
