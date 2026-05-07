@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "siliconBoutique": {
+      "type": "object",
+      "required": [
+        "runId",
+        "environment",
+        "machineType",
+        "processorFamily",
+        "architecture",
+        "loadGenerator"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "machineType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "processorFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "architecture": {
+          "type": "string",
+          "enum": [
+            "x86_64",
+            "arm64"
+          ]
+        },
+        "loadGenerator": {
+          "type": "object",
+          "required": [
+            "concurrentUsers",
+            "usersPerSecond",
+            "testDuration"
+          ],
+          "properties": {
+            "concurrentUsers": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "usersPerSecond": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(0\\.[0-9]*[1-9][0-9]*|[1-9][0-9]*(\\.[0-9]+)?)$"
+                }
+              ]
+            },
+            "testDuration": {
+              "type": "string",
+              "pattern": "^([1-9][0-9]*(ms|s|m|h))+$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

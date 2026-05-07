@@ -1,0 +1,84 @@
+# Default values for local SiliconBoutique validation.
+
+siliconBoutique:
+  runId: run-local-dev
+  environment: local
+  machineType: local
+  processorFamily: local
+  architecture: x86_64
+  loadGenerator:
+    concurrentUsers: 10
+    usersPerSecond: 1
+    testDuration: 20m
+
+onlineboutique:
+  images:
+    repository: us-central1-docker.pkg.dev/google-samples/microservices-demo
+    tag: v0.10.5
+
+  serviceAccounts:
+    create: true
+    annotations: {}
+    annotationsOnlyForCartservice: false
+
+  networkPolicies:
+    create: false
+
+  sidecars:
+    create: false
+
+  authorizationPolicies:
+    create: false
+
+  opentelemetryCollector:
+    create: false
+
+  googleCloudOperations:
+    profiler: false
+    tracing: false
+    metrics: false
+
+  frontend:
+    create: true
+    externalService: true
+    platform: local
+
+  adService:
+    create: true
+
+  cartService:
+    create: true
+
+  checkoutService:
+    create: true
+
+  currencyService:
+    create: true
+
+  emailService:
+    create: true
+
+  loadGenerator:
+    create: true
+
+  paymentService:
+    create: true
+
+  productCatalogService:
+    create: true
+
+  recommendationService:
+    create: true
+
+  shippingService:
+    create: true
+
+  cartDatabase:
+    type: redis
+    connectionString: redis-cart:6379
+    inClusterRedis:
+      create: true
+      publicRepository: true
+
+  shoppingAssistantService:
+    create: false

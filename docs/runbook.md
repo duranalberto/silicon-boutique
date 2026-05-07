@@ -66,6 +66,130 @@ terraform destroy -auto-approve
 ! kubectl get namespace "$namespace" --context siliconboutique
 ```
 
+## Local Workload Validation
+
+After local Terraform creates the benchmark namespace, deploy the P2 workload chart into that namespace. The chart pins Google's `onlineboutique` Helm chart to `0.10.5` and uses a post-renderer to apply SiliconBoutique run labels, teardown annotations, and load-generator settings to rendered resources.
+
+```bash
+cd infra/terraform/local-kubernetes
+terraform apply -auto-approve
+namespace="$(terraform output -raw namespace)"
+run_id="$(terraform output -raw run_id)"
+environment="$(terraform output -raw environment)"
+machine_type="$(terraform output -raw machine_type)"
+processor_family="$(terraform output -raw processor_family)"
+architecture="$(terraform output -raw architecture)"
+cd ../../..
+
+helm dependency update k8s/charts/silicon-boutique-online-boutique
+helm lint k8s/charts/silicon-boutique-online-boutique
+helm plugin list | awk 'NR > 1 {print $1}' | grep -qx silicon-boutique-metadata \
+  || helm plugin install k8s/charts/silicon-boutique-online-boutique/post-renderer
+helm upgrade --install silicon-boutique-online-boutique \
+  ./k8s/charts/silicon-boutique-online-boutique \
+  --namespace "$namespace" \
+  --kube-context siliconboutique \
+  --set-string siliconBoutique.runId="$run_id" \
+  --set-string siliconBoutique.environment="$environment" \
+  --set-string siliconBoutique.machineType="$machine_type" \
+  --set-string siliconBoutique.processorFamily="$processor_family" \
+  --set-string siliconBoutique.architecture="$architecture" \
+  --set siliconBoutique.loadGenerator.concurrentUsers=10 \
+  --set siliconBoutique.loadGenerator.usersPerSecond=1 \
+  --set-string siliconBoutique.loadGenerator.testDuration=20m \
+  --post-renderer silicon-boutique-metadata
+
+kubectl wait deployment --all \
+  --for=condition=Available \
+  --timeout=10m \
+  --namespace "$namespace" \
+  --context siliconboutique
+kubectl get pods,services --namespace "$namespace" --context siliconboutique
+```
+
+## Local Monitoring Validation
+
+After the local workload is installed and ready, deploy the P2.3 monitoring chart into the same Terraform-owned namespace. The chart installs Prometheus with 24-hour retention, Kubernetes metric exporters, and a blackbox frontend probe for HTTP latency.
+
+```bash
+helm dependency update k8s/charts/silicon-boutique-monitoring
+helm lint k8s/charts/silicon-boutique-monitoring
+helm template sb-monitoring \
+  ./k8s/charts/silicon-boutique-monitoring \
+  --namespace "$namespace" \
+  --set-string siliconBoutique.runId="$run_id" \
+  --set-string siliconBoutique.environment="$environment" \
+  --set-string siliconBoutique.machineType="$machine_type" \
+  --set-string siliconBoutique.processorFamily="$processor_family" \
+  --set-string siliconBoutique.architecture="$architecture" \
+  --set-string siliconBoutique.workloadNamespace="$namespace"
+
+helm upgrade --install sb-monitoring \
+  ./k8s/charts/silicon-boutique-monitoring \
+  --namespace "$namespace" \
+  --kube-context siliconboutique \
+  --set-string siliconBoutique.runId="$run_id" \
+  --set-string siliconBoutique.environment="$environment" \
+  --set-string siliconBoutique.machineType="$machine_type" \
+  --set-string siliconBoutique.processorFamily="$processor_family" \
+  --set-string siliconBoutique.architecture="$architecture" \
+  --set-string siliconBoutique.workloadNamespace="$namespace"
+
+kubectl rollout status deployment/sb-monitoring-kube-state-metrics \
+  --namespace "$namespace" \
+  --context siliconboutique \
+  --timeout=10m
+kubectl rollout status deployment/sb-monitoring-prometheus-blackbox-exporter \
+  --namespace "$namespace" \
+  --context siliconboutique \
+  --timeout=10m
+kubectl rollout status daemonset/sb-monitoring-prometheus-node-exporter \
+  --namespace "$namespace" \
+  --context siliconboutique \
+  --timeout=10m
+kubectl wait pod \
+  --for=condition=Ready \
+  --selector app.kubernetes.io/name=prometheus \
+  --timeout=10m \
+  --namespace "$namespace" \
+  --context siliconboutique
+```
+
+Port-forward Prometheus and confirm the local benchmark signals have samples. Run the port-forward in one terminal:
+
+```bash
+kubectl port-forward service/sb-monitoring-kube-prometh-prometheus \
+  9090:9090 \
+  --namespace "$namespace" \
+  --context siliconboutique
+```
+
+Then query from another terminal:
+
+```bash
+prometheus='http://127.0.0.1:9090/api/v1/query'
+curl -fsG "$prometheus" --data-urlencode "query=sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container!=\"\",image!=\"\"}[5m]))"
+curl -fsG "$prometheus" --data-urlencode "query=sum(container_memory_working_set_bytes{namespace=\"$namespace\",container!=\"\",image!=\"\"})"
+curl -fsG "$prometheus" --data-urlencode "query=sum(rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",container!=\"\",image!=\"\"}[5m])) / sum(rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",container!=\"\",image!=\"\"}[5m]))"
+curl -fsG "$prometheus" --data-urlencode "query=kube_pod_info{namespace=\"$namespace\"}"
+curl -fsG "$prometheus" --data-urlencode "query=probe_duration_seconds{silicon_boutique_component=\"frontend-probe\"}"
+curl -fsG "$prometheus" --data-urlencode "query=silicon_boutique:frontend_probe_latency_seconds"
+```
+
+Clean up monitoring before uninstalling the workload and destroying the Terraform-owned namespace:
+
+```bash
+helm uninstall sb-monitoring \
+  --namespace "$namespace" \
+  --kube-context siliconboutique
+
+helm uninstall silicon-boutique-online-boutique \
+  --namespace "$namespace" \
+  --kube-context siliconboutique
+cd infra/terraform/local-kubernetes
+terraform destroy -auto-approve
+```
+
 ## Cloud Rollout
 
 1. Use GCP for the first cloud benchmark target after local validation is complete.

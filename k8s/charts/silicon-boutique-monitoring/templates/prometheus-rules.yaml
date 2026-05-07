@@ -1,0 +1,75 @@
+{{- if .Values.recordingRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "silicon-boutique-monitoring.fullname" . }}-benchmark
+  labels:
+    {{- include "silicon-boutique-monitoring.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: silicon-boutique.benchmark
+      interval: 15s
+      rules:
+        - record: silicon_boutique:workload_cpu_usage_cores:rate5m
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            sum(rate(container_cpu_usage_seconds_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        - record: silicon_boutique:workload_memory_working_set_bytes
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            sum(container_memory_working_set_bytes{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""})
+        - record: silicon_boutique:workload_cpu_throttling_ratio:rate5m
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            sum(rate(container_cpu_cfs_throttled_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+            /
+            sum(rate(container_cpu_cfs_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        - record: silicon_boutique:workload_ready_pods
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            sum(kube_pod_status_ready{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", condition="true"})
+        - record: silicon_boutique:workload_restarts_total
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            sum(kube_pod_container_status_restarts_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}"})
+        - record: silicon_boutique:frontend_probe_latency_seconds
+          labels:
+            run_id: {{ .Values.siliconBoutique.runId | quote }}
+            environment: {{ .Values.siliconBoutique.environment | quote }}
+            machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+            processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+            architecture: {{ .Values.siliconBoutique.architecture | quote }}
+            workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+          expr: |
+            max(probe_duration_seconds{silicon_boutique_component="frontend-probe"})
+{{- end }}

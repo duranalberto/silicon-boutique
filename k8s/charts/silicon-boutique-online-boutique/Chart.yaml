@@ -1,0 +1,11 @@
+apiVersion: v2
+name: silicon-boutique-online-boutique
+description: SiliconBoutique wrapper chart for the Google Online Boutique benchmark workload
+type: application
+version: 0.1.0
+appVersion: "v0.10.5"
+dependencies:
+  - name: onlineboutique
+    version: 0.10.5
+    repository: oci://us-docker.pkg.dev/online-boutique-ci/charts
+

@@ -1,0 +1,27 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: {{ include "silicon-boutique-monitoring.fullname" . }}-frontend
+  labels:
+    {{- include "silicon-boutique-monitoring.labels" . | nindent 4 }}
+spec:
+  interval: {{ .Values.siliconBoutique.probeInterval | quote }}
+  module: http_2xx
+  prober:
+    url: {{ printf "%s-prometheus-blackbox-exporter:9115" .Release.Name | quote }}
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      labels:
+        silicon_boutique_part_of: silicon-boutique
+        silicon_boutique_component: frontend-probe
+        silicon_boutique_run_id: {{ .Values.siliconBoutique.runId | quote }}
+        silicon_boutique_environment: {{ .Values.siliconBoutique.environment | quote }}
+        silicon_boutique_machine_type: {{ .Values.siliconBoutique.machineType | quote }}
+        silicon_boutique_processor_family: {{ .Values.siliconBoutique.processorFamily | quote }}
+        silicon_boutique_architecture: {{ .Values.siliconBoutique.architecture | quote }}
+        silicon_boutique_workload_namespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+        silicon_boutique_frontend_service: {{ .Values.siliconBoutique.frontendServiceName | quote }}
+      static:
+        - {{ include "silicon-boutique-monitoring.frontendUrl" . | quote }}

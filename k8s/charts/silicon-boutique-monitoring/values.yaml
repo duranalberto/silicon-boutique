@@ -1,0 +1,75 @@
+# Default values for local SiliconBoutique monitoring validation.
+
+siliconBoutique:
+  runId: run-local-dev
+  environment: local
+  machineType: local
+  processorFamily: local
+  architecture: x86_64
+  workloadNamespace: default
+  frontendServiceName: frontend
+  frontendPath: /
+  probeInterval: 15s
+
+recordingRules:
+  enabled: true
+
+metricContract:
+  enabled: true
+
+kube-prometheus-stack:
+  crds:
+    enabled: true
+
+  grafana:
+    enabled: false
+
+  alertmanager:
+    enabled: false
+
+  defaultRules:
+    create: false
+
+  kubelet:
+    enabled: true
+    serviceMonitor:
+      cAdvisor: true
+
+  kube-state-metrics:
+    enabled: true
+
+  nodeExporter:
+    enabled: true
+
+  prometheus-node-exporter:
+    hostRootFsMount:
+      enabled: false
+
+  prometheus:
+    prometheusSpec:
+      retention: 24h
+      scrapeInterval: 15s
+      evaluationInterval: 15s
+      probeSelectorNilUsesHelmValues: false
+      probeSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: silicon-boutique
+          silicon-boutique/component: monitoring
+      ruleSelectorNilUsesHelmValues: false
+      ruleSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: silicon-boutique
+          silicon-boutique/component: monitoring
+
+prometheus-blackbox-exporter:
+  config:
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 5s
+        http:
+          method: GET
+          preferred_ip_protocol: ip4
+
+  serviceMonitor:
+    enabled: false

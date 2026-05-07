@@ -1,0 +1,37 @@
+{{- if .Values.metricContract.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "silicon-boutique-monitoring.fullname" . }}-metric-contract
+  labels:
+    {{- include "silicon-boutique-monitoring.labels" . | nindent 4 }}
+data:
+  contract.yaml: |
+    runMetadata:
+      runId: {{ .Values.siliconBoutique.runId | quote }}
+      environment: {{ .Values.siliconBoutique.environment | quote }}
+      machineType: {{ .Values.siliconBoutique.machineType | quote }}
+      processorFamily: {{ .Values.siliconBoutique.processorFamily | quote }}
+      architecture: {{ .Values.siliconBoutique.architecture | quote }}
+      workloadNamespace: {{ .Values.siliconBoutique.workloadNamespace | quote }}
+      frontendTarget: {{ include "silicon-boutique-monitoring.frontendUrl" . | quote }}
+    queries:
+      cpuUsageCores: |
+        sum(rate(container_cpu_usage_seconds_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+      memoryWorkingSetBytes: |
+        sum(container_memory_working_set_bytes{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""})
+      cpuThrottlingRatio: |
+        sum(rate(container_cpu_cfs_throttled_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        /
+        sum(rate(container_cpu_cfs_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+      podMetadata: |
+        kube_pod_info{namespace="{{ .Values.siliconBoutique.workloadNamespace }}"}
+      readinessRatio: |
+        sum(kube_pod_status_ready{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", condition="true"})
+        /
+        count(kube_pod_status_ready{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", condition="true"})
+      restartRate: |
+        sum(rate(kube_pod_container_status_restarts_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}"}[5m]))
+      frontendProbeLatencySeconds: |
+        probe_duration_seconds{silicon_boutique_component="frontend-probe"}
+{{- end }}

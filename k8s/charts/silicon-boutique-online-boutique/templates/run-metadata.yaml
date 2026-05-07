@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "silicon-boutique-online-boutique.fullname" . }}-run-metadata
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "silicon-boutique-online-boutique.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: run-metadata
+data:
+  labels.json: |-
+    {{ include "silicon-boutique-online-boutique.labelsJson" . }}
+  annotations.json: |-
+    {{ include "silicon-boutique-online-boutique.annotationsJson" . }}
+  load-generator.json: |-
+    {{ include "silicon-boutique-online-boutique.loadGeneratorJson" . }}
