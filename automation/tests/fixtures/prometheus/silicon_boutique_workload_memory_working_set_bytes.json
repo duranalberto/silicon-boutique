@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_memory_working_set_bytes",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "1000"],
+          [1778155215, "1500"],
+          [1778155230, "2000"],
+          [1778155245, "1500"],
+          [1778155260, "1000"]
+        ]
+      }
+    ]
+  }
+}

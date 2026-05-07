@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_cpu_usage_cores:rate5m",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "1.5"],
+          [1778155215, "2.0"],
+          [1778155230, "2.5"],
+          [1778155245, "2.0"],
+          [1778155260, "1.5"]
+        ]
+      }
+    ]
+  }
+}

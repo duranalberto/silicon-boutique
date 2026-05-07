@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SiliconBoutiqueBenchmarkSummary",
+  "type": "object",
+  "required": [
+    "run_id",
+    "namespace",
+    "environment",
+    "cloud_provider",
+    "machine_type",
+    "processor_family",
+    "architecture",
+    "benchmark_start",
+    "benchmark_end",
+    "duration_seconds",
+    "generated_at",
+    "summary_status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "namespace": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "cloud_provider": { "type": "string", "minLength": 1 },
+    "machine_type": { "type": "string", "minLength": 1 },
+    "processor_family": { "type": "string", "minLength": 1 },
+    "architecture": { "type": "string", "minLength": 1 },
+    "benchmark_start": { "type": ["string", "null"], "format": "date-time" },
+    "benchmark_end": { "type": ["string", "null"], "format": "date-time" },
+    "duration_seconds": { "type": ["integer", "null"], "minimum": 1 },
+    "generated_at": { "type": ["string", "null"], "format": "date-time" },
+    "avg_cpu_usage_cores": { "type": ["number", "null"] },
+    "max_cpu_usage_cores": { "type": ["number", "null"] },
+    "avg_cpu_utilization_pct": { "type": ["number", "null"] },
+    "avg_memory_working_set_bytes": { "type": ["number", "null"] },
+    "max_memory_working_set_bytes": { "type": ["number", "null"] },
+    "max_memory_used_gb": { "type": ["number", "null"] },
+    "avg_cpu_throttling_ratio": { "type": ["number", "null"] },
+    "max_cpu_throttling_ratio": { "type": ["number", "null"] },
+    "min_ready_pods": { "type": ["number", "null"] },
+    "avg_ready_pods": { "type": ["number", "null"] },
+    "max_ready_pods": { "type": ["number", "null"] },
+    "max_restarts_total": { "type": ["number", "null"] },
+    "frontend_latency_p50_ms": { "type": ["number", "null"] },
+    "frontend_latency_p95_ms": { "type": ["number", "null"] },
+    "frontend_latency_p99_ms": { "type": ["number", "null"] },
+    "frontend_latency_max_ms": { "type": ["number", "null"] },
+    "cost_per_1m_requests_usd": { "type": ["number", "null"] },
+    "metrics_coverage_ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "missing_metrics": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "empty_metrics": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "invalid_metric_samples": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "summary_status": {
+      "type": "string",
+      "enum": ["complete", "partial"]
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_restarts_total",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "0"],
+          [1778155215, "0"],
+          [1778155230, "1"],
+          [1778155245, "1"],
+          [1778155260, "1"]
+        ]
+      }
+    ]
+  }
+}

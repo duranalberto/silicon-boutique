@@ -176,6 +176,50 @@ curl -fsG "$prometheus" --data-urlencode "query=probe_duration_seconds{silicon_b
 curl -fsG "$prometheus" --data-urlencode "query=silicon_boutique:frontend_probe_latency_seconds"
 ```
 
+Extract the benchmark window into structured P3.1 metrics JSON. Set the window to the actual load-test period; the example below uses the latest 20 minutes:
+
+```bash
+benchmark_end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+benchmark_start="$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+
+python3 automation/scripts/extract_prometheus_metrics.py \
+  --prometheus-url http://127.0.0.1:9090 \
+  --run-id "$run_id" \
+  --namespace "$namespace" \
+  --start "$benchmark_start" \
+  --end "$benchmark_end" \
+  --step 15s \
+  --output artifacts/prometheus-metrics.json \
+  --strict
+```
+
+Generate the P3.2 benchmark summary and persist a local BigQuery-ready NDJSON row. Direct BigQuery loading is deferred to later automation work, but the store format is intended to be loadable without manual cleanup:
+
+```bash
+python3 automation/scripts/generate_benchmark_summary.py \
+  --metrics-input artifacts/prometheus-metrics.json \
+  --summary-output artifacts/benchmark-summary.json \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --environment "$environment" \
+  --machine-type "$machine_type" \
+  --processor-family "$processor_family" \
+  --architecture "$architecture" \
+  --cloud-provider local \
+  --strict
+```
+
+Validate the local summary store before using rows for cross-machine comparisons. P3.3 is a local quality gate; direct BigQuery loading and cost comparability remain later work.
+
+```bash
+python3 automation/scripts/validate_benchmark_comparability.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparability-report.json \
+  --min-duration-seconds 1200 \
+  --min-coverage-ratio 0.95 \
+  --strict
+```
+
 Clean up monitoring before uninstalling the workload and destroying the Terraform-owned namespace:
 
 ```bash

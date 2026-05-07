@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_ready_pods",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "11"],
+          [1778155215, "11"],
+          [1778155230, "11"],
+          [1778155245, "11"],
+          [1778155260, "11"]
+        ]
+      }
+    ]
+  }
+}

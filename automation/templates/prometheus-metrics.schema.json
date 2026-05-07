@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SiliconBoutiquePrometheusMetrics",
+  "type": "object",
+  "required": ["run_id", "namespace", "window", "metrics", "quality"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "window": {
+      "type": "object",
+      "required": ["start", "end", "step_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "step_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["sample_count", "unit"],
+        "properties": {
+          "sample_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "avg": {
+            "type": ["number", "null"]
+          },
+          "min": {
+            "type": ["number", "null"]
+          },
+          "max": {
+            "type": ["number", "null"]
+          },
+          "p50": {
+            "type": ["number", "null"]
+          },
+          "p95": {
+            "type": ["number", "null"]
+          },
+          "p99": {
+            "type": ["number", "null"]
+          }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": [
+        "missing_series",
+        "empty_series",
+        "invalid_samples",
+        "expected_samples_per_metric",
+        "coverage_ratio"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "missing_series": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "empty_series": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "invalid_samples": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "expected_samples_per_metric": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}

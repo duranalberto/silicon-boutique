@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:frontend_probe_latency_seconds",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "0.10"],
+          [1778155215, "0.20"],
+          [1778155230, "0.50"],
+          [1778155245, "0.30"],
+          [1778155260, "0.15"]
+        ]
+      }
+    ]
+  }
+}

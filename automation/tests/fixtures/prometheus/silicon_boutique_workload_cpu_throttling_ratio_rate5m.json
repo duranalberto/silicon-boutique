@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_cpu_throttling_ratio:rate5m",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "0.01"],
+          [1778155215, "0.02"],
+          [1778155230, "0.03"],
+          [1778155245, "0.02"],
+          [1778155260, "0.01"]
+        ]
+      }
+    ]
+  }
+}
