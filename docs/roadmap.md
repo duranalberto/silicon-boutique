@@ -3,10 +3,10 @@
 ## Phase 0: Repo Bootstrap
 
 ### P0.1 - Normalize repository documentation
-- Description: Reconcile terminology across `docs/`, `README.md`, and layout notes so the local-first path, GCP rollout path, and MCP readiness path all use the same phase language.
-- Why it matters: The roadmap should be the clearest entry point for implementation, and inconsistent naming makes later tickets harder to follow.
-- How to test: Verify internal doc links resolve, confirm phase names match across the core docs, and ensure the roadmap descriptions agree with the spec and runbook.
-- Edge cases: Stale links, mismatched phase numbering, and duplicated wording between the roadmap and spec.
+- Description: Reconcile terminology across `README.md`, `docs/spec-driven-development.md`, `docs/project-layout.md`, `docs/runbook.md`, `docs/architecture.md`, and this roadmap so the local Kubernetes validation path, GCP rollout path, metrics pipeline, automation flow, and future MCP boundary all use the same language.
+- Why it matters: The roadmap is the clearest entry point for implementation work, and inconsistent naming across the core docs creates avoidable ambiguity before the first scaffold lands.
+- How to test: Verify every internal link in the core docs resolves, confirm the phase names and workflow order match across the spec, runbook, architecture notes, and roadmap, and check that repeated terms use the same meanings everywhere.
+- Edge cases: Stale links, duplicate phase names, mismatched workflow order, and duplicated wording between the roadmap and the spec.
 - Dependencies: None.
 
 ### P0.2 - Establish base folder structure

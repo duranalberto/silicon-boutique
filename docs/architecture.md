@@ -2,15 +2,15 @@
 
 ## Overview
 
-SiliconBoutique is organized around a benchmark pipeline with a clear separation between infrastructure, workload execution, observability, and future agent access. The first validated path is local development inside the devcontainer and a local Kubernetes cluster, with GCP remaining the first cloud target for later rollout.
+SiliconBoutique is organized around a benchmark pipeline with a clear separation between infrastructure, workload deployment, metrics collection, automation, and future MCP access. The first validated path is local development inside the devcontainer and a local Kubernetes validation path, with GCP remaining the first cloud rollout path.
 
 ## Main Parts
 
-- `infra/terraform/`: provisions ephemeral infrastructure for local Kubernetes validation and the GCP rollout path.
-- `k8s/charts/`: packages the workload and monitoring stack for deployment.
+- `infra/`: provisions ephemeral infrastructure for local Kubernetes validation and the GCP rollout path.
+- `k8s/`: packages the workload and monitoring stack for deployment.
 - `automation/`: extracts metrics and prepares benchmark summaries.
-- `.github/workflows/`: orchestrates setup, run, extraction, and teardown.
-- `mcp-server/`: reserved for a future MCP interface over benchmark data and run control.
+- `.github/workflows/`: orchestrates provisioning, deployment, benchmark execution, extraction, and teardown.
+- `mcp-server/`: reserved for a future MCP boundary over benchmark data and run control.
 
 ## Data Flow
 

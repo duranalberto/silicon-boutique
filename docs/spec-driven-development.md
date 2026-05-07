@@ -7,20 +7,20 @@
 ---
 
 ### 1. Executive Summary & Cloud Strategy
-Project SiliconBoutique transforms cloud infrastructure into an automated testing laboratory. By utilizing **Google Cloud Platform (GCP)**—specifically GKE and Spot VMs—as the first cloud target, while also supporting local Kubernetes for development and testing, we achieve native compatibility with the Google-developed Online Boutique workload while minimizing compute costs by up to 90%.
+Project SiliconBoutique transforms cloud infrastructure into an automated testing laboratory. By utilizing **Google Cloud Platform (GCP)**, specifically GKE and Spot VMs, as the first cloud rollout path while also supporting a local Kubernetes validation path for development and testing, we keep the Google-developed Online Boutique workload compatible across environments while minimizing compute costs.
 
-This architecture supports a **Model Context Protocol (MCP)** integration layer so future AI agents or LLMs can autonomously trigger benchmarks, query historical performance data, and analyze processor comparisons without human intervention.
+This architecture supports a **Model Context Protocol (MCP)** boundary so future AI agents or LLMs can autonomously trigger benchmarks, query historical performance data, and analyze processor comparisons without human intervention.
 
 ---
 
 ### 2. Architecture Overview
-The system is divided into five decoupled components. To ensure MCP readiness, all interactions between the automation layer and the data layer are heavily structured and API-driven.
+The system is divided into five decoupled components. To ensure MCP readiness, all interactions between the automation layer and the metrics layer are structured and API-driven.
 
-1. **Infrastructure Foundation:** Ephemeral Kubernetes environments provisioned via Terraform, with GKE as the first cloud target.
-2. **Workload Generator:** Helm-deployed microservices with configurable load profiles.
-3. **Observability & Data Lake:** Short-term Prometheus metrics exported to a persistent BigQuery data lake (Crucial for AI/MCP querying).
-4. **Automation Engine:** GitHub Actions for orchestration, exposing RESTful workflow triggers.
-5. **Control Plane / MCP Interface (Future-Proofing):** A lightweight API/schema design allowing AI agents to consume the system.
+1. **Infrastructure Foundation:** Ephemeral Kubernetes environments provisioned via Terraform, with a local Kubernetes validation path first and GCP as the rollout target.
+2. **Workload Deployment:** Helm-deployed Online Boutique services with configurable load profiles.
+3. **Metrics Pipeline:** Prometheus metrics summarized into structured benchmark data and persisted in BigQuery for AI and MCP querying.
+4. **Automation Workflow:** GitHub Actions orchestration that sequences provisioning, deployment, benchmark execution, extraction, and teardown.
+5. **MCP Boundary:** A lightweight API and schema design allowing AI agents to consume benchmark status and historical data.
 
 ---
 
@@ -49,26 +49,26 @@ The system is divided into five decoupled components. To ensure MCP readiness, a
 * **Technology:** Prometheus (kube-prometheus-stack), Grafana, Google BigQuery.
 * **Requirements:**
     * Prometheus scrapes local metrics (Node CPU/RAM, Pod Throttling, P99 Latency).
-    * **MCP Readiness Pivot:** Instead of leaving data in a remote-write Prometheus bucket, aggregate the results of the 20-minute run and push a structured JSON payload to **BigQuery**. 
+    * **MCP Readiness Pivot:** Instead of leaving data in a remote-write Prometheus bucket, aggregate the results of the benchmark run and push a structured JSON payload to **BigQuery**.
     * BigQuery allows future LLMs to run complex SQL analysis via MCP (e.g., *"Compare average P99 checkout latency between c3-standard-4 and t2a-standard-4"*).
 
 #### Component 4: Automation Orchestrator
 **Goal:** End-to-end pipeline execution with zero human touch.
-* **Technology:** GitHub Actions (or GitLab CI).
+* **Technology:** GitHub Actions.
 * **Requirements:**
-    * **Phase 1 (Setup):** `terraform apply -auto-approve -var="machine_type=$MACHINE"`
-    * **Phase 2 (Deploy):** `helm upgrade --install ...`
-    * **Phase 3 (Test):** Run LoadGenerator for exactly 20 minutes.
-    * **Phase 4 (Extract):** Run a script to query Prometheus, calculate averages/percentiles, and push the final `BenchmarkSummary` to BigQuery.
-    * **Phase 5 (Teardown):** `terraform destroy -auto-approve` (Guaranteed to run via `always()` conditionals, preventing billing leaks).
+    * **Provision:** `terraform apply -auto-approve -var="machine_type=$MACHINE"`
+    * **Deploy:** `helm upgrade --install ...`
+    * **Benchmark:** Run LoadGenerator for exactly 20 minutes.
+    * **Extract:** Run a script to query Prometheus, calculate averages and percentiles, and push the final `BenchmarkSummary` to BigQuery.
+    * **Teardown:** `terraform destroy -auto-approve` (Guaranteed to run via `always()` conditionals, preventing billing leaks).
 
 ---
 
 ### 4. AI / MCP Integration Design (Extensibility)
 
-To ensure this project can be consumed by an AI agent via the Model Context Protocol, we must design the system with a clear **API Boundary** and **Data Schema**. 
+To ensure this project can be consumed by an AI agent via the Model Context Protocol, we must design the system with a clear **API boundary** and **data schema**.
 
-We will expose the GitHub Actions via the `workflow_dispatch` API, and the data via BigQuery.
+We will expose the GitHub Actions workflow via the `workflow_dispatch` API, and the data via BigQuery.
 
 #### Future MCP Server Tools to be Implemented:
 When the MCP service is built, it will expose the following tools to the LLM:
@@ -106,13 +106,4 @@ When the MCP service is built, it will expose the following tools to the LLM:
 
 ### 5. Implementation Roadmap
 
-* **Phase 1: Local Proof of Concept**
-    * Make the devcontainer a usable local benchmark environment.
-    * Verify Helm deploys correctly against a local Kubernetes cluster such as minikube.
-* **Phase 2: Pipeline Automation**
-    * Write the GitHub Actions YAML.
-    * Ensure robust state management (GCS backend for Terraform) so `destroy` never fails.
-* **Phase 3: Data Engineering & MCP Prep**
-    * Write the Python extraction script (Phase 4 of CI/CD) that pulls Prometheus metrics, formats them into the JSON schema defined above, and inserts them into BigQuery.
-* **Phase 4: MCP Server Implementation**
-    * Write a lightweight Python or Node.js MCP server that securely holds the GitHub PAT and GCP Service Account credentials, exposing the three tools defined in Section 4.
+[`docs/roadmap.md`](roadmap.md) is the authoritative implementation sequence for this repository. It tracks the current Phase 0 through Phase 5 flow: repo bootstrap, infrastructure, workload deployment, metrics pipeline, automation, and MCP readiness.
