@@ -18,7 +18,7 @@ FORBIDDEN_IMPORT_TEXT = (
 )
 
 
-class McpBoundaryScaffoldTest(unittest.TestCase):
+class McpBoundaryPackageTest(unittest.TestCase):
     def env(self):
         return {**os.environ, "PYTHONPATH": str(MCP_SRC)}
 
@@ -53,7 +53,7 @@ class McpBoundaryScaffoldTest(unittest.TestCase):
         self.assertIn("silicon-boutique-mcp", result.stdout)
         self.assertIn("--manifest", result.stdout)
 
-    def test_manifest_lists_planned_capability_names(self):
+    def test_manifest_lists_boundary_capability_names(self):
         result = subprocess.run(
             [sys.executable, "-m", "silicon_boutique_mcp", "--manifest"],
             cwd=REPO_ROOT,

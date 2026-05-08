@@ -11,7 +11,7 @@ silicon-boutique/
 ├── docs/                    # Living documentation and planning
 ├── infra/                   # Infrastructure as code
 ├── k8s/                     # Kubernetes manifests and Helm assets
-├── mcp-server/              # Future MCP service boundary
+├── mcp-server/              # MCP boundary package and fixture-backed contracts
 ├── AGENTS.md                # Agent operating instructions
 ├── README.md                # Top-level project overview
 ├── CONTRIBUTING.md          # Contribution workflow and expectations
@@ -22,5 +22,5 @@ silicon-boutique/
 
 - The `docs/` folder is the source of truth for planning and architecture notes.
 - The terminology in `README.md`, `docs/spec-driven-development.md`, `docs/architecture.md`, `docs/runbook.md`, and `docs/roadmap.md` should describe the same benchmark pipeline stages.
-- The `automation/`, `infra/`, and `k8s/` folders are expected to grow as the implementation lands.
-- The `mcp-server/` folder is reserved for the future API boundary described in the spec.
+- The `automation/`, `infra/`, and `k8s/` folders contain the implemented local and GCP benchmark pipeline assets.
+- The `mcp-server/` folder contains dependency-light MCP boundary contracts and fixture-backed local adapters; production adapters are tracked in the roadmap.

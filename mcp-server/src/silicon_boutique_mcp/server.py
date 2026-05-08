@@ -1,4 +1,4 @@
-"""Discoverable entry point for the SiliconBoutique MCP boundary scaffold."""
+"""Discoverable entry point for the SiliconBoutique MCP boundary package."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def build_boundary_manifest() -> BoundaryManifest:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="silicon-boutique-mcp",
-        description="Inspect the SiliconBoutique MCP boundary scaffold.",
+        description="Inspect the SiliconBoutique MCP boundary package.",
     )
     parser.add_argument(
         "--manifest",

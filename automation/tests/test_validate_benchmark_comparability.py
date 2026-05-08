@@ -98,6 +98,44 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["comparable_run_ids"], ["run-a", "run-b"])
         self.assertEqual(report["rejected_runs"], [])
 
+    def test_single_valid_summary_passes_summary_mode(self):
+        result, report = self.run_validator(
+            [self.valid_summary()],
+            "--mode",
+            "summary",
+            "--strict",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["validation_mode"], "summary")
+        self.assertEqual(report["summary_validation_status"], "pass")
+        self.assertEqual(report["comparability_validation_status"], "fail")
+        self.assertEqual(report["comparability_status"], "fail")
+        self.assertEqual(report["comparable_run_ids"], ["run-a"])
+        self.assertEqual(report["rejected_runs"], [])
+
+    def test_single_valid_summary_fails_comparability_mode(self):
+        result, report = self.run_validator(
+            [self.valid_summary()],
+            "--mode",
+            "comparability",
+            "--strict",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report["summary_validation_status"], "pass")
+        self.assertEqual(report["comparability_validation_status"], "fail")
+
+    def test_single_invalid_summary_fails_summary_mode(self):
+        row = self.valid_summary()
+        row["summary_status"] = "partial"
+
+        result, report = self.run_validator([row], "--mode", "summary", "--strict")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report["summary_validation_status"], "fail")
+        self.assertIn("summary_status_not_complete", report["rejected_runs"][0]["reasons"])
+
     def test_short_duration_fails_quality_bar(self):
         row = self.valid_summary()
         row["duration_seconds"] = 1199

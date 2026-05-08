@@ -43,6 +43,7 @@ Build and validate the chart dependency:
 ```bash
 helm dependency update k8s/charts/silicon-boutique-online-boutique
 helm lint k8s/charts/silicon-boutique-online-boutique
+python3 -m unittest discover -s k8s/tests
 ```
 
 Install the Helm 4 post-renderer plugin from the local chart directory:

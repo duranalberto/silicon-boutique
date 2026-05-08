@@ -1,4 +1,4 @@
-"""Abstract ports for the future MCP service boundary.
+"""Abstract ports for the MCP service boundary.
 
 The interfaces in this module intentionally describe what the MCP layer needs
 without binding it to GitHub Actions, BigQuery, Terraform, Helm, or automation

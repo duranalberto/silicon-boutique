@@ -1,6 +1,6 @@
 # Infrastructure
 
-This directory is reserved for Infrastructure as Code used by SiliconBoutique.
+This directory contains Infrastructure as Code used by SiliconBoutique.
 
 Current subdirectory:
 

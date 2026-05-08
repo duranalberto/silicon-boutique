@@ -28,7 +28,9 @@ This repository is meant to be easy for both humans and agents to extend safely.
 - `terraform validate`
 - `helm lint`
 - `kubectl get pods`
-- `python -m pytest`
+- `python3 -m unittest discover -s automation/tests`
+- `PYTHONPATH=mcp-server/src python3 -m unittest discover -s mcp-server/tests`
+- `python3 -m unittest discover -s k8s/tests`
 
 ## Safety Notes
 

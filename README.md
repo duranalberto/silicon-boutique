@@ -19,7 +19,7 @@ SiliconBoutique is a local-first benchmarking workspace for running the Google O
 - `infra/`: infrastructure definitions shared across local and cloud workflows.
 - `k8s/`: Kubernetes manifests and Helm chart assets.
 - `automation/`: metric extraction and reporting helpers.
-- `mcp-server/`: future Model Context Protocol service.
+- `mcp-server/`: dependency-light MCP boundary package with fixture-testable status and history contracts.
 - `docs/`: living documentation for architecture, runbooks, and planning.
 
 ## Working Locally
@@ -28,4 +28,4 @@ Open the repository in a devcontainer to get Terraform, kubectl, Helm, Python, D
 
 Use the local Kubernetes validation path for development and test validation first; GCP remains the first cloud rollout path.
 
-The implementation itself is still scaffolded, so the documentation in `docs/` is the source of truth for the intended system behavior, rollout plan, and terminology.
+Implemented pieces now include local and GCP Terraform roots, Helm workload and monitoring charts, metric extraction and summary automation, GitHub Actions benchmark orchestration, a local benchmark entrypoint, and MCP boundary contracts for status and historical summary queries. The remaining durable storage and production MCP adapters are tracked in the roadmap.

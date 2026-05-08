@@ -66,6 +66,25 @@ terraform destroy -auto-approve
 ! kubectl get namespace "$namespace" --context siliconboutique
 ```
 
+## Local Benchmark Automation
+
+Use the local automation entrypoint when you want the same workflow shape as the GCP benchmark job without dispatching GitHub Actions. The command provisions the local Terraform namespace, deploys workload and monitoring charts, runs the benchmark window, extracts metrics, generates and validates the summary, captures workflow trace artifacts, and tears down the namespace.
+
+```bash
+python3 automation/scripts/run_local_benchmark.py
+```
+
+For a shorter local smoke run, lower the summary duration threshold to match the measured window:
+
+```bash
+python3 automation/scripts/run_local_benchmark.py \
+  --run-id local-smoke \
+  --test-duration 2m \
+  --min-duration-seconds 60
+```
+
+The generated `artifacts/` directory uses the same artifact names as the GitHub workflow, including `prometheus-metrics.json`, `benchmark-summary.json`, `benchmark-summaries.ndjson`, `comparability-report.json`, `workflow-trace.json`, `workflow-trace.env`, and teardown logs. Use `--failure-stage after_provision`, `--failure-stage after_monitoring_ready`, or `--failure-stage before_extract` only to validate cleanup behavior. Use `--skip-destroy` only when intentionally debugging local resources.
+
 ## Local Workload Validation
 
 After local Terraform creates the benchmark namespace, deploy the P2 workload chart into that namespace. The chart pins Google's `onlineboutique` Helm chart to `0.10.5` and uses a post-renderer to apply SiliconBoutique run labels, teardown annotations, and load-generator settings to rendered resources.
@@ -83,6 +102,7 @@ cd ../../..
 
 helm dependency update k8s/charts/silicon-boutique-online-boutique
 helm lint k8s/charts/silicon-boutique-online-boutique
+python3 -m unittest discover -s k8s/tests
 helm plugin list | awk 'NR > 1 {print $1}' | grep -qx silicon-boutique-metadata \
   || helm plugin install k8s/charts/silicon-boutique-online-boutique/post-renderer
 helm upgrade --install silicon-boutique-online-boutique \
@@ -208,17 +228,20 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --strict
 ```
 
-Validate the local summary store before using rows for cross-machine comparisons. P3.3 is a local quality gate; direct BigQuery loading and cost comparability remain later work.
+Validate the local summary store after summary generation. Use summary mode for a fresh benchmark artifact that may contain only one row.
 
 ```bash
 python3 automation/scripts/validate_benchmark_comparability.py \
   --summary-store artifacts/benchmark-summaries.ndjson \
   --schema automation/templates/benchmark-summary.schema.json \
   --report-output artifacts/comparability-report.json \
+  --mode summary \
   --min-duration-seconds 1200 \
   --min-coverage-ratio 0.95 \
   --strict
 ```
+
+Before using accumulated rows for cross-machine comparisons, rerun the same validator with `--mode comparability`; that mode requires at least two comparable rows.
 
 Clean up monitoring before uninstalling the workload and destroying the Terraform-owned namespace:
 
@@ -269,7 +292,7 @@ The job runs the standard benchmark sequence:
 6. Sleep for the configured benchmark window.
 7. Port-forward Prometheus and run `automation/scripts/extract_prometheus_metrics.py`.
 8. Run `automation/scripts/generate_benchmark_summary.py`.
-9. Run `automation/scripts/validate_benchmark_comparability.py`.
+9. Run `automation/scripts/validate_benchmark_comparability.py --mode summary`.
 10. Uninstall Helm releases and destroy Terraform-managed GCP resources.
 11. Capture traceability outputs.
 12. Upload the generated benchmark artifacts.
@@ -301,7 +324,7 @@ Normal GitHub workflow cancellation should still allow `if: always()` cleanup to
 
 ## MCP Boundary Validation
 
-The Phase 5 boundary scaffold lives in `mcp-server/`. It is intentionally dependency-light and exposes fixture-testable contracts without implementing GitHub Actions dispatch, BigQuery queries, or real MCP SDK handlers yet.
+The Phase 5 MCP boundary package lives in `mcp-server/`. It is intentionally dependency-light and exposes fixture-testable contracts without implementing the P8 production GitHub Actions dispatch adapter, BigQuery history adapter, or real MCP SDK transport.
 
 Validate the package entry point, tool contracts, and boundary isolation with:
 

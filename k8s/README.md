@@ -1,6 +1,6 @@
 # Kubernetes Assets
 
-This directory is reserved for Kubernetes manifests and Helm chart assets used to deploy the benchmark workload and supporting observability components.
+This directory contains Kubernetes manifests and Helm chart assets used to deploy the benchmark workload and supporting observability components.
 
 Current subdirectories:
 

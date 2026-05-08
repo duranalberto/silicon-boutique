@@ -397,12 +397,13 @@ jobs:
             --cloud-provider gcp \
             --strict
 
-      - name: Validate benchmark comparability
+      - name: Validate benchmark summary
         run: |
           python3 automation/scripts/validate_benchmark_comparability.py \
             --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
             --schema automation/templates/benchmark-summary.schema.json \
             --report-output "$ARTIFACTS_DIR/comparability-report.json" \
+            --mode summary \
             --min-duration-seconds 1200 \
             --min-coverage-ratio 0.95 \
             --strict

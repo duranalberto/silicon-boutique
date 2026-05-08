@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "silicon-boutique-mcp"
 version = "0.1.0"
-description = "Boundary scaffold for future SiliconBoutique MCP tools."
+description = "Dependency-light MCP boundary contracts for SiliconBoutique."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

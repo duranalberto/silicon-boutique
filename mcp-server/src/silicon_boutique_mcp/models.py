@@ -1,4 +1,4 @@
-"""Boundary-only data models for future SiliconBoutique MCP tools."""
+"""Boundary-only data models for SiliconBoutique MCP contracts."""
 
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ class HistoricalMetricsResponse:
 
 @dataclass(frozen=True, slots=True)
 class BoundaryCapability:
-    """Named planned capability for the MCP boundary."""
+    """Named capability exposed in the MCP boundary manifest."""
 
     name: str
     description: str
@@ -162,7 +162,7 @@ class ToolDefinition:
 
 @dataclass(frozen=True, slots=True)
 class BoundaryManifest:
-    """Discoverable manifest for the current boundary scaffold."""
+    """Discoverable manifest for the current boundary package."""
 
     service_name: str
     boundary_version: str

@@ -55,12 +55,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-store", type=Path, required=True)
     parser.add_argument("--schema", type=Path, required=True)
     parser.add_argument("--report-output", type=Path, required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("summary", "comparability"),
+        default="comparability",
+        help=(
+            "summary validates each row independently; comparability also requires "
+            "at least two comparable rows."
+        ),
+    )
     parser.add_argument("--min-duration-seconds", type=int, default=1200)
     parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit 2 when any row is rejected, too few comparable rows exist, or schema drift is found.",
+        help="Exit 2 when the selected validation mode does not pass.",
     )
     args = parser.parse_args()
     if args.min_duration_seconds < 1:
@@ -80,6 +89,7 @@ def main() -> int:
             schema_path=args.schema,
             schema=schema,
             rows=rows,
+            mode=args.mode,
             min_duration_seconds=args.min_duration_seconds,
             min_coverage_ratio=args.min_coverage_ratio,
         )
@@ -88,9 +98,10 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    if args.strict and report["comparability_status"] != "pass":
+    status_field = f"{args.mode}_validation_status"
+    if args.strict and report[status_field] != "pass":
         print(
-            f"comparability validation {report['comparability_status']}; see {args.report_output}",
+            f"{args.mode} validation {report[status_field]}; see {args.report_output}",
             file=sys.stderr,
         )
         return 2
@@ -103,6 +114,7 @@ def build_report(
     schema_path: Path,
     schema: dict[str, Any],
     rows: list[dict[str, Any]],
+    mode: str,
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> dict[str, Any]:
@@ -147,7 +159,12 @@ def build_report(
             }
         )
 
-    status = comparability_status(
+    summary_status = summary_validation_status(
+        total_rows=len(rows),
+        rejected_count=len(rejected_runs),
+        schema_drift_found=schema_drift_found,
+    )
+    cross_run_status = comparability_status(
         total_rows=len(rows),
         comparable_count=len(comparable_run_ids),
         rejected_count=len(rejected_runs),
@@ -157,13 +174,16 @@ def build_report(
     return {
         "summary_store": str(summary_store),
         "schema": str(schema_path),
+        "validation_mode": mode,
         "min_duration_seconds": min_duration_seconds,
         "min_coverage_ratio": min_coverage_ratio,
         "total_rows": len(rows),
         "comparable_run_ids": comparable_run_ids,
         "rejected_runs": rejected_runs,
         "schema_field_count": len(schema_fields),
-        "comparability_status": status,
+        "summary_validation_status": summary_status,
+        "comparability_validation_status": cross_run_status,
+        "comparability_status": cross_run_status,
     }
 
 
@@ -249,6 +269,17 @@ def comparability_status(
     if comparable_count == total_rows:
         return "pass"
     return "warn"
+
+
+def summary_validation_status(
+    *,
+    total_rows: int,
+    rejected_count: int,
+    schema_drift_found: bool,
+) -> str:
+    if total_rows == 0 or rejected_count or schema_drift_found:
+        return "fail"
+    return "pass"
 
 
 def schema_field_set(schema: dict[str, Any]) -> set[str]:

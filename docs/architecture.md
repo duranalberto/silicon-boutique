@@ -2,7 +2,7 @@
 
 ## Overview
 
-SiliconBoutique is organized around a benchmark pipeline with a clear separation between infrastructure, workload deployment, metrics collection, automation, and future MCP access. The first validated path is local development inside the devcontainer and a local Kubernetes validation path, with GCP remaining the first cloud rollout path.
+SiliconBoutique is organized around a benchmark pipeline with a clear separation between infrastructure, workload deployment, metrics collection, automation, and MCP boundary contracts. The first validated path is local development inside the devcontainer and a local Kubernetes validation path, with GCP remaining the first cloud rollout path.
 
 ## Main Parts
 
@@ -10,15 +10,15 @@ SiliconBoutique is organized around a benchmark pipeline with a clear separation
 - `k8s/`: packages the workload and monitoring stack for deployment.
 - `automation/`: extracts metrics and prepares benchmark summaries.
 - `.github/workflows/`: orchestrates provisioning, deployment, benchmark execution, extraction, and teardown.
-- `mcp-server/`: dependency-light Python boundary scaffold with fixture-testable status and historical query contracts for future MCP access.
+- `mcp-server/`: dependency-light Python boundary package with fixture-testable status and historical query contracts; production adapters remain roadmap work.
 
 ## Data Flow
 
 1. The devcontainer boots a local Kubernetes environment for development validation.
-2. Terraform and Helm are exercised against the same workflow shape that will later target both local Kubernetes and GCP.
+2. Terraform and Helm are exercised against the same workflow shape for local Kubernetes and GCP.
 3. The load generator runs a benchmark window.
 4. Automation gathers metrics and summarizes the run.
-5. Results are stored for later comparison and future agent queries.
+5. Results are stored in local artifacts for comparison and fixture-backed agent queries; durable BigQuery history is roadmap work.
 6. The MCP boundary exposes status and historical query contracts through abstract ports, keeping GitHub Actions dispatch and summary storage adapters outside the service core.
 
 ## Design Notes

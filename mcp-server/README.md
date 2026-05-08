@@ -1,6 +1,6 @@
 # MCP Server
 
-This directory contains the dependency-light Python boundary scaffold for the future Model Context Protocol service. P5.2 exposes fixture-testable status and historical query contracts without adding a real MCP SDK server or production cloud adapters.
+This directory contains the dependency-light Python MCP boundary package. P5.2 exposes fixture-testable `get_benchmark_status` and `query_historical_metrics` contracts without adding a real MCP SDK server or production cloud adapters.
 
 ## Package Layout
 
@@ -18,7 +18,7 @@ PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --manifest
 PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --tools
 ```
 
-After package installation, the same scaffold is available as:
+After package installation, the same CLI is available as:
 
 ```bash
 silicon-boutique-mcp --help
@@ -32,7 +32,7 @@ The package exposes abstract ports for:
 - checking run status
 - querying historical benchmark results
 
-The current manifest keeps `trigger_benchmark_run` planned and marks these P5.2 contracts as ready to exercise locally:
+The current manifest keeps `trigger_benchmark_run` planned for P8.1 and marks these P5.2 contracts as ready to exercise locally:
 
 - `get_benchmark_status`
 - `query_historical_metrics`
