@@ -22,12 +22,15 @@ BASELINE_LABEL_FIELDS = (
 QUALITY_LIST_FIELDS = ("missing_metrics", "empty_metrics")
 QUALITY_MAP_FIELDS = ("invalid_metric_samples",)
 NULLABLE_COMPARABILITY_FIELDS = (
-    "avg_cpu_utilization_pct",
+    "benchmark_compute_cost_usd",
     "cost_per_1m_requests_usd",
+    "node_hourly_price_usd",
 )
 NON_NULLABLE_COMPARABLE_METRIC_FIELDS = (
     "avg_cpu_usage_cores",
     "max_cpu_usage_cores",
+    "avg_cpu_utilization_pct",
+    "max_cpu_utilization_pct",
     "avg_memory_working_set_bytes",
     "max_memory_working_set_bytes",
     "max_memory_used_gb",
@@ -41,6 +44,13 @@ NON_NULLABLE_COMPARABLE_METRIC_FIELDS = (
     "frontend_latency_p95_ms",
     "frontend_latency_p99_ms",
     "frontend_latency_max_ms",
+    "request_count_total",
+    "request_success_count",
+    "request_failure_count",
+    "avg_requests_per_second",
+    "load_concurrent_users",
+    "load_users_per_second",
+    "load_profile_source",
 )
 
 
@@ -55,6 +65,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-store", type=Path, required=True)
     parser.add_argument("--schema", type=Path, required=True)
     parser.add_argument("--report-output", type=Path, required=True)
+    parser.add_argument(
+        "--run-id",
+        help=(
+            "Validate only one run_id from a multi-row store. Without this, "
+            "all rows in the store are validated."
+        ),
+    )
     parser.add_argument(
         "--mode",
         choices=("summary", "comparability"),
@@ -84,11 +101,14 @@ def main() -> int:
     try:
         schema = load_json(args.schema, "schema")
         rows = read_summary_store(args.summary_store)
+        selected_rows = select_rows(rows, args.run_id)
         report = build_report(
             summary_store=args.summary_store,
             schema_path=args.schema,
             schema=schema,
-            rows=rows,
+            rows=selected_rows,
+            source_total_rows=len(rows),
+            selected_run_id=args.run_id,
             mode=args.mode,
             min_duration_seconds=args.min_duration_seconds,
             min_coverage_ratio=args.min_coverage_ratio,
@@ -114,6 +134,8 @@ def build_report(
     schema_path: Path,
     schema: dict[str, Any],
     rows: list[dict[str, Any]],
+    source_total_rows: int,
+    selected_run_id: str | None,
     mode: str,
     min_duration_seconds: int,
     min_coverage_ratio: float,
@@ -175,6 +197,8 @@ def build_report(
         "summary_store": str(summary_store),
         "schema": str(schema_path),
         "validation_mode": mode,
+        "selected_run_id": selected_run_id,
+        "source_total_rows": source_total_rows,
         "min_duration_seconds": min_duration_seconds,
         "min_coverage_ratio": min_coverage_ratio,
         "total_rows": len(rows),
@@ -185,6 +209,17 @@ def build_report(
         "comparability_validation_status": cross_run_status,
         "comparability_status": cross_run_status,
     }
+
+
+def select_rows(rows: list[dict[str, Any]], run_id: str | None) -> list[dict[str, Any]]:
+    if run_id:
+        selected = [row for row in rows if row.get("run_id") == run_id]
+        if len(selected) != 1:
+            raise ComparabilityError(
+                f"expected exactly one summary row for run_id {run_id!r}, found {len(selected)}"
+            )
+        return selected
+    return rows
 
 
 def rejection_reasons(

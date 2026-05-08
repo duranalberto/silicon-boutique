@@ -10,6 +10,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXTRACT_SCRIPT = REPO_ROOT / "automation" / "scripts" / "extract_prometheus_metrics.py"
 SUMMARY_SCRIPT = REPO_ROOT / "automation" / "scripts" / "generate_benchmark_summary.py"
 PROMETHEUS_FIXTURES = REPO_ROOT / "automation" / "tests" / "fixtures" / "prometheus"
+LOADGENERATOR_FIXTURE = (
+    REPO_ROOT / "automation" / "tests" / "fixtures" / "loadgenerator" / "stats.json"
+)
 
 
 class GenerateBenchmarkSummaryTest(unittest.TestCase):
@@ -43,7 +46,21 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
         metrics_input = Path(tmpdir) / "prometheus-metrics.json"
         summary_output = Path(tmpdir) / "benchmark-summary.json"
         summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
+        loadgenerator_stats = Path(tmpdir) / "loadgenerator-stats.json"
         metrics_input.write_text(json.dumps(metrics_payload), encoding="utf-8")
+        loadgenerator_stats.write_text(
+            json.dumps(
+                {
+                    "run_id": metrics_payload["run_id"],
+                    "request_count_total": 300,
+                    "request_success_count": 295,
+                    "request_failure_count": 5,
+                    "avg_requests_per_second": 5.0,
+                    "parse_status": "parsed",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         result = subprocess.run(
             [
@@ -65,6 +82,16 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
                 "x86_64",
                 "--cloud-provider",
                 "local",
+                "--loadgenerator-stats",
+                str(loadgenerator_stats),
+                "--node-count",
+                "1",
+                "--concurrent-users",
+                "10",
+                "--users-per-second",
+                "1",
+                "--load-profile-source",
+                "manual",
                 "--generated-at",
                 "2026-05-07T12:02:00Z",
                 *extra_args,
@@ -96,10 +123,67 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["duration_seconds"], 60)
             self.assertEqual(summary["generated_at"], "2026-05-07T12:02:00Z")
             self.assertAlmostEqual(summary["avg_cpu_usage_cores"], 1.9)
+            self.assertAlmostEqual(summary["avg_cpu_utilization_pct"], 47.5)
+            self.assertAlmostEqual(summary["max_cpu_utilization_pct"], 62.5)
             self.assertAlmostEqual(summary["max_memory_used_gb"], 0.000002)
             self.assertAlmostEqual(summary["frontend_latency_p99_ms"], 492.0)
-            self.assertIsNone(summary["avg_cpu_utilization_pct"])
+            self.assertEqual(summary["request_count_total"], 300)
+            self.assertEqual(summary["request_success_count"], 295)
+            self.assertEqual(summary["request_failure_count"], 5)
+            self.assertAlmostEqual(summary["avg_requests_per_second"], 5.0)
+            self.assertEqual(summary["load_concurrent_users"], 10)
+            self.assertAlmostEqual(summary["load_users_per_second"], 1.0)
+            self.assertEqual(summary["load_profile_source"], "manual")
+            self.assertIsNone(summary["node_hourly_price_usd"])
+            self.assertIsNone(summary["benchmark_compute_cost_usd"])
             self.assertIsNone(summary["cost_per_1m_requests_usd"])
+
+    def test_priced_run_calculates_cost_per_million_requests(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pricing = Path(tmpdir) / "pricing.json"
+            pricing.write_text(
+                json.dumps(
+                    {
+                        "prices": [
+                            {
+                                "cloud_provider": "gcp",
+                                "region": "us-central1",
+                                "machine_type": "e2-standard-4",
+                                "pricing_model": "spot",
+                                "hourly_usd": 0.03,
+                                "currency": "USD",
+                                "source_note": "test",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result, summary_output, _ = self.run_summary(
+                tmpdir,
+                self.make_metrics_payload(),
+                "--environment",
+                "gcp",
+                "--machine-type",
+                "e2-standard-4",
+                "--cloud-provider",
+                "gcp",
+                "--region",
+                "us-central1",
+                "--node-count",
+                "2",
+                "--pricing-model",
+                "spot",
+                "--pricing-table",
+                str(pricing),
+                "--strict",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads(summary_output.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(summary["node_hourly_price_usd"], 0.03)
+            self.assertAlmostEqual(summary["benchmark_compute_cost_usd"], 0.001)
+            self.assertAlmostEqual(summary["cost_per_1m_requests_usd"], 3.38983051)
 
     def test_duplicate_run_id_fails_by_default(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -167,6 +251,48 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             summary = json.loads(summary_output.read_text(encoding="utf-8"))
             self.assertEqual(summary["summary_status"], "partial")
             self.assertIsNone(summary["frontend_latency_p99_ms"])
+
+    def test_strict_mode_fails_when_cpu_utilization_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics_payload = self.make_metrics_payload()
+            metrics_payload["metrics"]["cpu_utilization_pct"]["avg"] = None
+
+            result, _, _ = self.run_summary(tmpdir, metrics_payload, "--strict")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("avg_cpu_utilization_pct", result.stderr)
+
+    def test_strict_mode_fails_when_cpu_utilization_is_impossible(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics_payload = self.make_metrics_payload()
+            metrics_payload["metrics"]["cpu_utilization_pct"]["max"] = 150.0
+
+            result, _, _ = self.run_summary(tmpdir, metrics_payload, "--strict")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("CPU utilization fields are outside the expected range", result.stderr)
+
+    def test_strict_priced_run_fails_when_pricing_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pricing = Path(tmpdir) / "pricing.json"
+            pricing.write_text(json.dumps({"prices": []}), encoding="utf-8")
+
+            result, _, _ = self.run_summary(
+                tmpdir,
+                self.make_metrics_payload(),
+                "--environment",
+                "gcp",
+                "--cloud-provider",
+                "gcp",
+                "--region",
+                "us-central1",
+                "--pricing-table",
+                str(pricing),
+                "--strict",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("required pricing fields are missing", result.stderr)
 
 
 if __name__ == "__main__":

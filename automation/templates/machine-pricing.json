@@ -1,0 +1,22 @@
+{
+  "prices": [
+    {
+      "cloud_provider": "gcp",
+      "region": "us-central1",
+      "machine_type": "e2-standard-4",
+      "pricing_model": "on_demand",
+      "hourly_usd": 0.134,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture rate for P7.4 tests and examples."
+    },
+    {
+      "cloud_provider": "gcp",
+      "region": "us-central1",
+      "machine_type": "e2-standard-4",
+      "pricing_model": "spot",
+      "hourly_usd": 0.0402,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture spot rate using 30% of on-demand for P7.4."
+    }
+  ]
+}

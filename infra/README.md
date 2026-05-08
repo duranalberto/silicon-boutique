@@ -2,6 +2,6 @@
 
 This directory contains Infrastructure as Code used by SiliconBoutique.
 
-Current subdirectory:
+Current subdirectories:
 
-- `terraform/`: Terraform definitions for local Kubernetes validation and the GCP rollout path
+- `terraform/`: Terraform definitions for local Kubernetes validation, the ephemeral GCP rollout path, and durable BigQuery summary storage

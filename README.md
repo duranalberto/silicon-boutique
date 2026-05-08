@@ -5,6 +5,7 @@ SiliconBoutique is a local-first benchmarking workspace for running the Google O
 ## Start Here
 
 - [`docs/spec-driven-development.md`](docs/spec-driven-development.md): the project specification and long-term design intent.
+- [`docs/local-usage.md`](docs/local-usage.md): the recommended first-time local setup and usage guide.
 - [`docs/project-layout.md`](docs/project-layout.md): the current repository layout and intended folder structure.
 - [`docs/architecture.md`](docs/architecture.md): the component breakdown and data flow.
 - [`docs/roadmap.md`](docs/roadmap.md): the implementation sequence and dependency order.

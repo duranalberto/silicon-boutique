@@ -36,6 +36,12 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         aggregations=("avg", "max"),
     ),
     MetricSpec(
+        output_name="cpu_utilization_pct",
+        query="silicon_boutique:workload_cpu_utilization_pct",
+        unit="percent",
+        aggregations=("avg", "max"),
+    ),
+    MetricSpec(
         output_name="memory_working_set_bytes",
         query="silicon_boutique:workload_memory_working_set_bytes",
         unit="bytes",
@@ -181,6 +187,13 @@ def main() -> int:
         expected_samples=expected_sample_count(start_dt, end_dt, step_seconds),
     )
 
+    rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(rendered, encoding="utf-8")
+    else:
+        print(rendered, end="")
+
     if args.strict and (
         output["quality"]["missing_series"]
         or output["quality"]["empty_series"]
@@ -191,13 +204,6 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-
-    rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
-    else:
-        print(rendered, end="")
     return 0
 
 

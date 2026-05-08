@@ -83,11 +83,21 @@ class BenchmarkSummaryReference:
     avg_cpu_usage_cores: float | None = None
     max_cpu_usage_cores: float | None = None
     avg_cpu_utilization_pct: float | None = None
+    max_cpu_utilization_pct: float | None = None
     max_memory_used_gb: float | None = None
     frontend_latency_p50_ms: float | None = None
     frontend_latency_p95_ms: float | None = None
     frontend_latency_p99_ms: float | None = None
     frontend_latency_max_ms: float | None = None
+    request_count_total: int | None = None
+    request_success_count: int | None = None
+    request_failure_count: int | None = None
+    avg_requests_per_second: float | None = None
+    load_concurrent_users: int | None = None
+    load_users_per_second: float | None = None
+    load_profile_source: str | None = None
+    node_hourly_price_usd: float | None = None
+    benchmark_compute_cost_usd: float | None = None
     cost_per_1m_requests_usd: float | None = None
     metrics_coverage_ratio: float | None = None
     missing_metrics: tuple[str, ...] = field(default_factory=tuple)

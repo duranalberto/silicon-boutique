@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "silicon_boutique:workload_cpu_utilization_pct",
+          "run_id": "test-run",
+          "workload_namespace": "sb-test"
+        },
+        "values": [
+          [1778155200, "37.5"],
+          [1778155215, "50.0"],
+          [1778155230, "62.5"],
+          [1778155245, "50.0"],
+          [1778155260, "37.5"]
+        ]
+      }
+    ]
+  }
+}

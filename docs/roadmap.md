@@ -134,10 +134,11 @@
 ## Phase 6: Implementation Audit Fixes
 
 ### P6.1 - Fix the single-run comparability gate
+- Status: Implemented; the validator supports `--run-id` for current-run summary validation while historical comparability remains an explicit unscoped mode.
 - Description: Split per-run summary validation from cross-run comparability validation so `.github/workflows/benchmark.yml` can succeed for a fresh benchmark artifact containing one summary row.
-- Why it matters: The current workflow writes a new local `artifacts/benchmark-summaries.ndjson` store for each run, then calls `validate_benchmark_comparability.py --strict`, whose pass criteria require at least two comparable rows. That makes the end-to-end benchmark workflow fail after summary generation even when extraction succeeded.
-- How to test: Run the validator against a one-row store and confirm the workflow-level gate passes when the row is schema-valid and complete; run a separate two-row comparison gate and confirm it still fails on incompatible rows.
-- Edge cases: First run for a new machine type, partial summaries, duplicate run IDs, and intentionally short branch-validation runs.
+- Why it matters: The workflow can append multiple local rows to `artifacts/benchmark-summaries.ndjson`, including short smoke runs. Current-run validation must not fail because unrelated historical rows are below the production duration threshold.
+- How to test: Run the validator against a multi-row store with `--run-id` and confirm the selected schema-valid row passes; run a separate unscoped two-row comparison gate and confirm it still fails on incompatible rows.
+- Edge cases: First run for a new machine type, partial summaries, duplicate run IDs, intentionally short branch-validation runs, and stale historical rows.
 - Dependencies: `P3.3`, `P4.1`.
 
 ### P6.2 - Add workflow-local dependency installation or switch documented test commands
@@ -168,92 +169,131 @@
 - Edge cases: Legitimate future MCP adapters, intentionally deferred BigQuery loading, and docs that should remain high-level.
 - Dependencies: `P5.2`.
 
-## Phase 7: Durable Results and Benchmark Economics
+## Phase 7: Priority Completion - Dashboard and Durable Results
 
-### P7.1 - Persist benchmark summaries to BigQuery
-- Description: Add the BigQuery dataset/table configuration, schema management, and load step that persists the canonical `BenchmarkSummary` beyond per-run artifacts.
-- Why it matters: The spec requires structured benchmark data in BigQuery for historical analysis and MCP queries, but current P3/P4 output only writes a local NDJSON artifact.
+Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now the highest-priority delivery phase because it closes the known gaps against the original use case: metrics must be durable, comparable, and visible in a dashboard after Online Boutique benchmark runs.
+
+### P7.1 - Enable Grafana dashboard delivery
+- Description: Turn on Grafana in the monitoring chart and add a run-scoped dashboard for Online Boutique benchmark signals: CPU usage, CPU utilization percentage, memory working set, CPU throttling, frontend latency percentiles, pod readiness, restarts, benchmark metadata, and benchmark window.
+- Why it matters: The original requirement asks for collected metrics to be presented in a dashboard. The current stack collects Prometheus metrics but does not present them in Grafana.
+- How to test: Render and lint the monitoring chart, deploy locally, port-forward Grafana, and confirm the dashboard loads with panels populated from the SiliconBoutique recording rules. Add template or unit checks that the dashboard ConfigMap is rendered when Grafana is enabled.
+- Edge cases: Empty Prometheus ranges, dashboard datasource naming drift, local runs shorter than panel range defaults, Grafana sidecar label mismatches, and multiple benchmark namespaces sharing one cluster.
+- Dependencies: `P2.3`, `P3.1`, `P6.4`.
+
+### P7.2 - Persist benchmark summaries to BigQuery
+- Description: Add BigQuery dataset/table configuration, schema management, and a workflow load step that persists the canonical `BenchmarkSummary` beyond per-run artifacts.
+- Why it matters: Historical processor comparison requires durable structured storage. Current P3/P4 output writes local JSON and NDJSON artifacts only.
 - How to test: Run a dry-run table validation, load fixture NDJSON into a test dataset, query by `run_id`, and confirm duplicate run handling is explicit.
 - Edge cases: Missing GCP credentials, dataset location mismatch, schema evolution, duplicate run IDs, partial summaries, and failed loads after infrastructure teardown.
 - Dependencies: `P3.2`, `P4.3`, `P6.1`.
 
-### P7.2 - Compute CPU utilization from node capacity
+### P7.3 - Compute CPU utilization from node capacity
 - Description: Extend monitoring extraction and summary generation so `avg_cpu_utilization_pct` is populated from workload CPU usage divided by allocatable or capacity cores for the benchmark node pool.
-- Why it matters: The spec calls for node utilization targets and the documented MCP output includes CPU utilization, but the summary generator currently sets `avg_cpu_utilization_pct` to `null`.
+- Why it matters: CPU utilization is one of the requested benchmark metrics and is currently represented as a nullable placeholder.
 - How to test: Add Prometheus fixtures for node allocatable/capacity metrics, generate a summary, and verify utilization is non-null, unit-stable, and bounded to a sensible range.
 - Edge cases: Multiple nodes, control-plane/system pods, missing kube-state-metrics node metrics, autoscaling node count changes, and local minikube capacity reporting.
 - Dependencies: `P2.3`, `P3.1`, `P3.2`.
 
-### P7.3 - Add cost and request-volume calculations
-- Description: Capture enough billing and traffic data to calculate `cost_per_1m_requests_usd` and the request count denominator used for price/performance comparisons.
-- Why it matters: Price-to-performance is a primary project objective, but `cost_per_1m_requests_usd` is currently a nullable future field and no request-volume summary field is persisted.
+### P7.4 - Add request-volume and cost calculations
+- Description: Capture enough traffic and pricing data to calculate request volume and `cost_per_1m_requests_usd` for price/performance comparisons.
+- Why it matters: Comparing new processors against previous generations needs both performance and economics; cost is currently a nullable placeholder and request volume is not persisted.
 - How to test: Generate summaries from fixture data with known machine pricing and request counts, then verify cost-per-million calculations and comparability validation.
 - Edge cases: Spot VM discounts and interruptions, regional price differences, GKE control-plane charges, load generator errors, retries, and runs with too few successful requests.
-- Dependencies: `P7.1`, `P7.2`.
+- Dependencies: `P7.2`, `P7.3`.
 
-### P7.4 - Add load-profile calibration
+### P7.5 - Add load-profile calibration
 - Description: Add a repeatable calibration workflow that finds load-generator settings that push target nodes toward the intended 80-90% utilization band without editing chart manifests.
-- Why it matters: P2.2 parameterizes load, but there is no implementation that tunes resource requests/limits or load intensity to create a valid hardware bottleneck across machine families.
+- Why it matters: P2.2 parameterizes load, but there is no implementation that tunes load intensity to create a valid hardware bottleneck across machine families.
 - How to test: Run calibration against local fixtures and one GCP machine type, then confirm the chosen settings are recorded with the summary and reused by benchmark runs.
 - Edge cases: Arm vs x86 behavior differences, load-generator saturation before service saturation, node pressure evictions, and short warmup windows.
-- Dependencies: `P7.2`, `P6.4`.
+- Dependencies: `P7.3`, `P6.4`.
 
-## Phase 8: Production MCP Integration
+### P7.6 - Add an end-to-end acceptance demo path
+- Description: Document and automate a single command or workflow dispatch that proves the required use case: deploy Online Boutique, run a benchmark, collect metrics, persist the summary, and open or publish the dashboard location.
+- Why it matters: The project needs a clear "this solves the use case" path instead of requiring readers to infer completion from separate Terraform, Helm, and Python pieces.
+- How to test: Run `python3 automation/scripts/run_acceptance_demo.py --mode local` and verify `artifacts/acceptance-demo-report.json` reports the same `run_id` across trace, summary, summary store, comparability, dashboard, and optional BigQuery evidence. Dispatch `.github/workflows/benchmark.yml` with `acceptance_demo=true` and verify the uploaded artifact contains `acceptance-demo-report.json`, `bigquery-load-report.json`, and dashboard evidence for the workflow `run_id`.
+- Edge cases: Missing optional BigQuery settings in local mode, dashboard credentials, short smoke runs that fail production thresholds, and benchmark teardown before dashboard inspection.
+- Dependencies: `P7.1`, `P7.2`, `P7.3`.
 
-### P8.1 - Implement `trigger_benchmark_run`
+## Phase 8: Cross-Environment Comparison
+
+### P8.1 - Normalize provider and processor metadata
+- Description: Extend benchmark metadata so every run records cloud provider, region, zone, machine type, CPU platform or processor family, architecture, node count, spot/on-demand mode, and load profile.
+- Why it matters: The original use case compares processors across previous generations and different cloud environments; metadata must be stable before comparisons are trustworthy.
+- How to test: Validate summary rows from local and GCP fixtures against the schema and confirm comparison mode rejects rows with incompatible or missing metadata.
+- Edge cases: Provider-specific naming, unavailable CPU platform labels, Arm vs x86 conventions, and local runs that lack cloud billing metadata.
+- Dependencies: `P7.2`, `P7.4`.
+
+### P8.2 - Add comparison reports over historical summaries
+- Description: Add a report generator that reads BigQuery or local NDJSON summaries and produces comparison tables for CPU, memory, latency, throughput, cost, and run quality across machine types.
+- Why it matters: The benchmark is useful only when repeated runs can be compared without manual spreadsheet work.
+- How to test: Use fixture rows for at least two machine types and confirm the report ranks results consistently and flags non-comparable runs.
+- Edge cases: Partial runs, mixed benchmark durations, schema version drift, missing cost fields, and multiple runs per machine type.
+- Dependencies: `P8.1`, `P7.4`.
+
+### P8.3 - Add the next cloud-provider scaffold
+- Description: Add a second cloud-provider path as a bounded scaffold, reusing the same Helm workload, monitoring chart, extraction scripts, and summary schema.
+- Why it matters: GCP is implemented as the first rollout target, but the stated goal includes different cloud environments.
+- How to test: Validate the new provider Terraform or Kubernetes access path in static mode, then run the workload deployment against a test cluster when credentials are available.
+- Edge cases: Managed Kubernetes feature differences, node label differences, load balancer behavior, metrics availability, and provider-specific teardown semantics.
+- Dependencies: `P8.1`, `P8.2`.
+
+## Phase 9: Production MCP Integration
+
+### P9.1 - Implement `trigger_benchmark_run`
 - Description: Add the production adapter that validates a `BenchmarkRunRequest`, dispatches `.github/workflows/benchmark.yml` through the GitHub Actions API, and returns a stable external run identity.
-- Why it matters: The spec lists benchmark triggering as a required MCP tool, but P5.2 only keeps it as a planned capability in the boundary manifest.
+- Why it matters: The spec lists benchmark triggering as a required MCP tool, but the implemented boundary is still fixture-backed.
 - How to test: Exercise the adapter against a mocked GitHub API and, in a guarded integration test, dispatch a branch workflow with safe inputs and verify the returned identity maps to the workflow run.
 - Edge cases: GitHub token scope errors, duplicate dispatches, input validation mismatches, branch/ref selection, workflow concurrency, and rate limits.
-- Dependencies: `P4.3`, `P5.1`, `P6.5`.
+- Dependencies: `P4.3`, `P5.1`, `P6.5`, `P7.6`.
 
-### P8.2 - Back status queries with GitHub Actions run state
+### P9.2 - Back status queries with GitHub Actions run state
 - Description: Replace fixture-only status lookup with an adapter that maps GitHub Actions run and job state to `queued`, `running`, `completed`, `failed`, or `unknown`.
-- Why it matters: The P5.2 contract can parse local trace fixtures, but real agents need live status for dispatched benchmark runs.
+- Why it matters: Real agents need live status for dispatched benchmark runs.
 - How to test: Mock GitHub workflow-run responses for queued, in-progress, success, failure, cancelled, and missing runs; verify trace fields stay non-secret.
 - Edge cases: Artifact upload after job completion, teardown failure after benchmark success, reruns, cancelled runs, force-cancelled cleanup, and missing workflow trace artifacts.
-- Dependencies: `P8.1`.
+- Dependencies: `P9.1`.
 
-### P8.3 - Back historical queries with BigQuery
+### P9.3 - Back historical queries with BigQuery
 - Description: Implement the production history store adapter using parameterized BigQuery SQL over the benchmark summary table.
-- Why it matters: P5.2 reads local NDJSON fixtures, while the architecture expects durable BigQuery history for processor comparison queries.
-- How to test: Run adapter tests against mocked BigQuery results and an integration test against a test dataset populated by P7.1 fixtures.
+- Why it matters: Agent and API consumers need durable history for processor comparison queries.
+- How to test: Run adapter tests against mocked BigQuery results and an integration test against a test dataset populated by P7.2 fixtures.
 - Edge cases: Empty history, malformed filters, query cost controls, schema drift, nullable economics fields, and pagination or limit handling.
-- Dependencies: `P7.1`, `P5.2`.
+- Dependencies: `P7.2`, `P5.2`.
 
-### P8.4 - Add a real MCP SDK server entrypoint
+### P9.4 - Add a real MCP SDK server entrypoint
 - Description: Add the MCP SDK transport and tool registration layer around the existing dependency-light service core.
 - Why it matters: The boundary package exposes contracts and a CLI, but it is not yet an MCP server that agents can connect to directly.
 - How to test: Start the server locally, list tools through an MCP client, call each tool with fixture and mocked production adapters, and verify JSON schemas match the existing contracts.
 - Edge cases: Secret configuration, adapter selection, tool errors, long-running dispatch calls, and keeping Terraform/Helm internals out of the MCP process.
-- Dependencies: `P8.1`, `P8.2`, `P8.3`.
+- Dependencies: `P9.1`, `P9.2`, `P9.3`.
 
-## Phase 9: Infrastructure and Operations Hardening
+## Phase 10: Infrastructure and Operations Hardening
 
-### P9.1 - Add remote Terraform state and run locking for GCP
+### P10.1 - Add remote Terraform state and run locking for GCP
 - Description: Configure a production-safe Terraform backend and locking strategy for GCP benchmark runs while preserving bounded static validation for pull requests.
 - Why it matters: The GitHub workflow currently relies on same-job local Terraform state. That supports cleanup within one job, but it limits recovery after runner loss and makes force-cancel cleanup harder.
 - How to test: Run static validation without backend credentials, then run a guarded cloud plan/apply/destroy with remote state and confirm cleanup can resume from a fresh runner.
 - Edge cases: State bucket permissions, state leakage, concurrent workflow runs, partial applies, and emergency cleanup after job cancellation.
-- Dependencies: `P4.2`, `P6.1`.
+- Dependencies: `P4.2`, `P6.1`, `P7.6`.
 
-### P9.2 - Add run-scoped orphan detection
+### P10.2 - Add run-scoped orphan detection
 - Description: Add a bounded audit script that lists GCP and Kubernetes resources matching a `run_id` and reports anything that survived teardown.
 - Why it matters: The workflow captures pre/post checks, but there is no reusable orphan detector for failed, cancelled, or force-cancelled runs.
 - How to test: Run the detector against empty state, fixture outputs, and a controlled failed teardown; verify it refuses to inspect or delete resources without a run scope.
 - Edge cases: Label propagation gaps, resources without labels, shared resources, API pagination, and missing cloud credentials.
-- Dependencies: `P1.3`, `P4.2`, `P9.1`.
+- Dependencies: `P1.3`, `P4.2`, `P10.1`.
 
-### P9.3 - Add CI validation for Terraform, Helm, Python, and docs
+### P10.3 - Add CI validation for Terraform, Helm, Python, and docs
 - Description: Add a pull-request validation workflow that runs bounded Terraform validation, Helm lint/template checks, Python unit tests, schema checks, and documentation link checks.
-- Why it matters: Current validation is manual. The repo already has tests and lintable charts, but regressions can land without a CI gate.
+- Why it matters: Current validation is mostly manual. The repo already has tests and lintable charts, but regressions can land without a CI gate.
 - How to test: Open a branch with a known failing fixture, chart render issue, or Terraform format drift and confirm CI blocks it with a clear failure.
 - Edge cases: Network-bound Helm dependency updates, Terraform provider downloads, hidden-file docs, Python path setup for `mcp-server`, and PRs without GCP credentials.
-- Dependencies: `P6.2`, `P6.3`.
+- Dependencies: `P6.2`, `P6.3`, `P7.1`.
 
-### P9.4 - Version and migrate benchmark schemas
-- Description: Add explicit schema versioning for Prometheus metrics, benchmark summaries, workflow traces, and MCP result models, plus a migration policy for BigQuery table evolution.
-- Why it matters: The summary schema already has nullable future fields and strict comparability checks. Durable BigQuery history and MCP adapters need controlled evolution.
+### P10.4 - Version and migrate benchmark schemas
+- Description: Add explicit schema versioning for Prometheus metrics, benchmark summaries, workflow traces, dashboard contracts, and MCP result models, plus a migration policy for BigQuery table evolution.
+- Why it matters: Durable BigQuery history, dashboards, and MCP adapters need controlled evolution as metrics and comparison fields change.
 - How to test: Validate old and new fixture rows, run a migration fixture, and confirm historical queries can filter or transform by schema version.
-- Edge cases: Backfilled runs, partial summaries, deleted fields, renamed fields, and MCP clients pinned to older output contracts.
-- Dependencies: `P7.1`, `P8.3`.
+- Edge cases: Backfilled runs, partial summaries, deleted fields, renamed fields, dashboard panels pinned to old fields, and MCP clients pinned to older output contracts.
+- Dependencies: `P7.2`, `P9.3`.

@@ -20,9 +20,21 @@ python3 automation/scripts/run_local_benchmark.py \
 
 Use `--skip-destroy` only for debugging a local run; the default path cleans up the Terraform-owned namespace.
 
+## Acceptance Demo
+
+`scripts/run_acceptance_demo.py` is the single-command P7.6 proof path. It runs the local benchmark flow, verifies the canonical summary and dashboard evidence for one `run_id`, optionally loads BigQuery when destination inputs are provided, writes `acceptance-demo-report.json`, and then cleans up.
+
+```bash
+python3 automation/scripts/run_acceptance_demo.py --mode local
+```
+
+Use `--dashboard-hold-seconds` for a bounded local Grafana inspection window before automatic cleanup resumes.
+
 ## Prometheus Extraction
 
 `scripts/extract_prometheus_metrics.py` queries the SiliconBoutique Prometheus recording rules for a benchmark window and writes deterministic JSON for the next pipeline stage.
+
+CPU utilization is extracted from `silicon_boutique:workload_cpu_utilization_pct`, which records workload CPU usage divided by allocatable CPU cores on nodes running benchmark pods, with node capacity used only when allocatable metrics are unavailable.
 
 Example against a port-forwarded local Prometheus endpoint:
 
@@ -51,11 +63,23 @@ python3 automation/scripts/extract_prometheus_metrics.py \
 
 ## Benchmark Summary Persistence
 
-`scripts/generate_benchmark_summary.py` consumes the Prometheus metrics JSON, writes one canonical benchmark summary, and persists a compact NDJSON row that is ready for a later BigQuery load step. Direct BigQuery insertion is intentionally deferred to keep P3.2 local-first and dependency-free.
+`scripts/generate_benchmark_summary.py` consumes the Prometheus metrics JSON, writes one canonical benchmark summary, and persists a compact NDJSON row that is ready for BigQuery loading.
+
+`scripts/extract_loadgenerator_stats.py` parses Locust aggregate stats from `deployment/loadgenerator` logs and writes request volume fields for the summary:
+
+```bash
+kubectl logs deployment/loadgenerator --namespace "$namespace" > artifacts/loadgenerator.log
+python3 automation/scripts/extract_loadgenerator_stats.py \
+  --logs-input artifacts/loadgenerator.log \
+  --output artifacts/loadgenerator-stats.json \
+  --run-id "$run_id" \
+  --strict
+```
 
 ```bash
 python3 automation/scripts/generate_benchmark_summary.py \
   --metrics-input artifacts/prometheus-metrics.json \
+  --loadgenerator-stats artifacts/loadgenerator-stats.json \
   --summary-output artifacts/benchmark-summary.json \
   --summary-store artifacts/benchmark-summaries.ndjson \
   --environment "$environment" \
@@ -63,10 +87,59 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --processor-family "$processor_family" \
   --architecture "$architecture" \
   --cloud-provider local \
+  --node-count 1 \
+  --concurrent-users "$concurrent_users" \
+  --users-per-second "$users_per_second" \
+  --load-profile-source manual \
   --strict
 ```
 
+For priced GCP runs, also pass `--region`, `--pricing-model`, and `--pricing-table automation/templates/machine-pricing.json`. The summary calculates `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` from successful request count, node count, duration, and hourly node price. Strict summary validation rejects impossible CPU utilization values and records both average and max utilization.
+
 The local summary store fails on duplicate `run_id` values by default. Use `--replace` only when intentionally regenerating a summary for the same benchmark run.
+
+## Load Calibration
+
+`scripts/calibrate_load_profile.py` finds load settings that target the 80-90% CPU utilization band and writes a reusable profile:
+
+```bash
+python3 automation/scripts/calibrate_load_profile.py \
+  --execute-local \
+  --output artifacts/load-profile-calibration.json \
+  --initial-concurrent-users 10 \
+  --initial-users-per-second 1 \
+  --trial-duration 5m
+```
+
+Use the selected profile in a later local benchmark run:
+
+```bash
+python3 automation/scripts/run_local_benchmark.py \
+  --load-profile-file artifacts/load-profile-calibration.json
+```
+
+For GCP calibration, use `--execute-gcp --project-id "$project_id"` to dispatch benchmark workflow trials. Selected profiles include machine metadata, target CPU band, source run IDs, observed utilization, and request failure ratio; pass those load settings to the workflow with `load_profile_source=calibration`.
+
+`scripts/load_benchmark_summary_to_bigquery.py` loads one canonical summary row into the durable BigQuery table provisioned by `infra/terraform/gcp-bigquery`. It validates the local NDJSON, inspects the remote table schema with `bq show`, checks for an existing `run_id`, and writes a load report whether the load succeeds or fails.
+
+```bash
+python3 automation/scripts/load_benchmark_summary_to_bigquery.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --project-id "$project_id" \
+  --dataset-id silicon_boutique \
+  --table-id benchmark_summaries \
+  --location US \
+  --schema automation/templates/benchmark-summary.bigquery-schema.json \
+  --load-report-output artifacts/bigquery-load-report.json \
+  --duplicate-policy fail \
+  --run-id "$run_id"
+```
+
+Duplicate `run_id` values fail before load. If you point the script at a multi-row NDJSON store, pass `--run-id` so exactly one row is selected.
+
+Use `--dry-run` with the same arguments to validate local input, table access, schema compatibility, and duplicate status without appending a row.
+
+`scripts/validate_bigquery_summary_load.py` is a guarded integration helper for test datasets. It loads one selected `run_id`, queries the same table for that row, writes `bigquery-validation-report.json`, and deletes only that exact test row when `--cleanup-row` is explicitly provided.
 
 ## Summary and Comparability Validation
 

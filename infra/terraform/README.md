@@ -6,8 +6,7 @@ Current roots:
 
 - `local-kubernetes/`: creates the local benchmark namespace in the devcontainer-managed `siliconboutique` minikube profile.
 - `gcp-gke/`: provisions the first GCP rollout path with a dedicated VPC, subnet, GKE cluster, and benchmark node pool.
-
-Planned roots include supporting infrastructure for later benchmark summary persistence in GCP.
+- `gcp-bigquery/`: provisions durable BigQuery benchmark summary history outside run-scoped teardown.
 
 ## Naming, Labels, and Teardown
 
@@ -60,3 +59,17 @@ terraform output labels
 terraform output teardown_check_commands
 timeout 30m terraform destroy -auto-approve -var='project_id=<project-id>' -var='static_validation_mode=false'
 ```
+
+## GCP BigQuery
+
+The BigQuery path manages persistent benchmark history. It is not coupled to the ephemeral GKE root and must not be destroyed as part of normal benchmark teardown.
+
+```bash
+cd infra/terraform/gcp-bigquery
+timeout 20s terraform fmt -check -recursive
+timeout 60s terraform init -backend=false -input=false
+timeout 30s terraform validate
+timeout 60s terraform plan -refresh=false -input=false -var='project_id=example-project'
+```
+
+The default destination is `<project-id>.silicon_boutique.benchmark_summaries` in location `US`. The benchmark workflow service account needs permission to inspect the table, query duplicate `run_id` values, and load rows.

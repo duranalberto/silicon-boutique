@@ -1,0 +1,420 @@
+{{- if index .Values "kube-prometheus-stack" "grafana" "enabled" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "silicon-boutique-monitoring.fullname" . }}-online-boutique-dashboard
+  labels:
+    {{- include "silicon-boutique-monitoring.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  online-boutique-benchmark.json: |-
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Workload CPU usage in cores for this benchmark run.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "cores"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_cpu_usage_cores:rate5m{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "CPU cores",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Workload CPU usage divided by allocatable CPU cores on nodes running benchmark pods, with capacity fallback.",
+          "fieldConfig": {
+            "defaults": {
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "noValue": "No CPU utilization data",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_cpu_utilization_pct{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "CPU utilization %",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Utilization",
+          "type": "gauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_memory_working_set_bytes{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "Memory working set",
+              "refId": "A"
+            }
+          ],
+          "title": "Memory Working Set",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "max": 1,
+              "min": 0,
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "id": 4,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_cpu_throttling_ratio:rate5m{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "CPU throttling ratio",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Throttling",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "id": 5,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "quantile_over_time(0.50, silicon_boutique:frontend_probe_latency_seconds{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}[$__rate_interval])",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "quantile_over_time(0.95, silicon_boutique:frontend_probe_latency_seconds{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}[$__rate_interval])",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "quantile_over_time(0.99, silicon_boutique:frontend_probe_latency_seconds{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}[$__rate_interval])",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ],
+          "title": "Frontend Latency Percentiles",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "lineWidth": 2,
+                "showPoints": "never"
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_ready_pods{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "Ready pods",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "silicon_boutique:workload_restarts_total{run_id=\"{{ .Values.siliconBoutique.runId }}\",workload_namespace=\"{{ .Values.siliconBoutique.workloadNamespace }}\"}",
+              "legendFormat": "Restarts total",
+              "refId": "B"
+            }
+          ],
+          "title": "Pod Readiness and Restarts",
+          "type": "timeseries"
+        },
+        {
+          "description": "Benchmark metadata rendered into this dashboard at install time.",
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 24
+          },
+          "id": 7,
+          "options": {
+            "content": "| Label | Value |\\n| --- | --- |\\n| run_id | {{ .Values.siliconBoutique.runId }} |\\n| environment | {{ .Values.siliconBoutique.environment }} |\\n| machine_type | {{ .Values.siliconBoutique.machineType }} |\\n| processor_family | {{ .Values.siliconBoutique.processorFamily }} |\\n| architecture | {{ .Values.siliconBoutique.architecture }} |\\n| workload_namespace | {{ .Values.siliconBoutique.workloadNamespace }} |\\n| benchmark_start | {{ default "pending" .Values.siliconBoutique.benchmarkStart }} |\\n| benchmark_end | {{ default "pending" .Values.siliconBoutique.benchmarkEnd }} |\\n\\nUse the dashboard time picker to match the benchmark window. The default range favors short local smoke runs.",
+            "mode": "markdown"
+          },
+          "pluginVersion": "12.2.1",
+          "title": "Benchmark Metadata and Window",
+          "type": "text"
+        }
+      ],
+      "refresh": "15s",
+      "schemaVersion": 42,
+      "tags": [
+        "silicon-boutique",
+        "online-boutique",
+        "benchmark"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "15s",
+          "30s",
+          "1m",
+          "5m"
+        ]
+      },
+      "timezone": "utc",
+      "title": "SiliconBoutique Online Boutique Benchmark",
+      "uid": "silicon-boutique-online-boutique",
+      "version": 1,
+      "weekStart": ""
+    }
+{{- end }}

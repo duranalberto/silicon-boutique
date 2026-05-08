@@ -98,6 +98,13 @@ class RunLocalBenchmarkTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             commands = command_strings(runner)
+            validator_commands = [
+                command
+                for command in commands
+                if "automation/scripts/validate_benchmark_comparability.py" in command
+            ]
+            self.assertEqual(len(validator_commands), 1)
+            self.assertIn("--run-id local-test", validator_commands[0])
             self.assertCommandOrder(
                 commands,
                 [
@@ -111,7 +118,10 @@ class RunLocalBenchmarkTest(unittest.TestCase):
                     "kubectl wait deployment --all",
                     "helm upgrade --install sb-monitoring",
                     "kubectl rollout restart deployment/loadgenerator",
+                    "helm upgrade --install sb-monitoring",
                     "automation/scripts/extract_prometheus_metrics.py",
+                    "kubectl logs deployment/loadgenerator",
+                    "automation/scripts/extract_loadgenerator_stats.py",
                     "automation/scripts/generate_benchmark_summary.py",
                     "automation/scripts/validate_benchmark_comparability.py",
                     "helm uninstall sb-monitoring",
@@ -138,6 +148,7 @@ class RunLocalBenchmarkTest(unittest.TestCase):
                 "provision-status.env",
                 "managed-resource-names.json",
                 "terraform-labels.json",
+                "terraform-apply.log",
                 "teardown-check-commands.json",
                 "helm-cleanup.log",
                 "teardown-precheck.txt",
@@ -147,6 +158,36 @@ class RunLocalBenchmarkTest(unittest.TestCase):
                 "workflow-trace.env",
             ):
                 self.assertTrue((artifacts_dir / artifact).exists(), artifact)
+
+    def test_load_profile_file_overrides_load_settings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / "profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "selected_profile": {
+                            "load_concurrent_users": 64,
+                            "load_users_per_second": 8.5,
+                            "load_profile_source": "calibration",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            args = run_local_benchmark.parse_args(
+                [
+                    "--run-id",
+                    "local-test",
+                    "--load-profile-file",
+                    str(profile),
+                ]
+            )
+            config = run_local_benchmark.config_from_args(args)
+
+            self.assertEqual(config.concurrent_users, "64")
+            self.assertEqual(config.users_per_second, "8.5")
+            self.assertEqual(config.load_profile_source, "calibration")
 
     def test_controlled_failure_after_provision_still_runs_cleanup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -162,6 +203,24 @@ class RunLocalBenchmarkTest(unittest.TestCase):
             self.assertIn("terraform destroy -auto-approve", "\n".join(commands))
             self.assertNotIn("helm upgrade --install silicon-boutique-online-boutique", "\n".join(commands))
 
+    def test_updates_monitoring_dashboard_with_benchmark_window(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            benchmark, runner = make_benchmark(tmpdir)
+
+            result = benchmark.run()
+
+            self.assertEqual(result, 0)
+            commands = command_strings(runner)
+            window_updates = [
+                command
+                for command in commands
+                if command.startswith("helm upgrade --install sb-monitoring")
+                and "--reuse-values" in command
+                and "siliconBoutique.benchmarkStart=" in command
+                and "siliconBoutique.benchmarkEnd=" in command
+            ]
+            self.assertEqual(len(window_updates), 1)
+
     def test_skip_destroy_records_trace_without_destroy(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             benchmark, runner = make_benchmark(tmpdir, skip_destroy=True)
@@ -176,6 +235,24 @@ class RunLocalBenchmarkTest(unittest.TestCase):
             )
             self.assertEqual(trace["teardown"]["destroy_attempted"], "false")
             self.assertEqual(trace["teardown"]["destroy_succeeded"], "skipped")
+
+    def test_unreachable_kubernetes_context_fails_before_terraform_apply(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            benchmark, runner = make_benchmark(tmpdir)
+            runner.fail_commands = {
+                "kubectl get nodes --context siliconboutique": 1,
+            }
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = benchmark.run()
+
+            self.assertEqual(result, 2)
+            self.assertIn("Kubernetes context 'siliconboutique' is not reachable", stderr.getvalue())
+            commands = "\n".join(command_strings(runner))
+            self.assertIn("kubectl get nodes --context siliconboutique", commands)
+            self.assertIn("minikube status --profile siliconboutique", commands)
+            self.assertNotIn("terraform apply -auto-approve", commands)
 
     def assertCommandOrder(self, commands, expected_prefixes):
         search_from = 0
@@ -205,6 +282,8 @@ def make_benchmark(tmpdir, *, failure_stage="none", skip_destroy=False):
         users_per_second="1",
         test_duration="20m",
         test_duration_seconds=1200,
+        pricing_model="none",
+        load_profile_source="manual",
         prometheus_port=9090,
         min_duration_seconds=1200,
         min_coverage_ratio=0.95,

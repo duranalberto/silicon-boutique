@@ -12,7 +12,7 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -49,6 +49,8 @@ class BenchmarkConfig:
     users_per_second: str
     test_duration: str
     test_duration_seconds: int
+    pricing_model: str
+    load_profile_source: str
     prometheus_port: int
     min_duration_seconds: int
     min_coverage_ratio: float
@@ -127,8 +129,10 @@ class LocalBenchmark:
             self.fail_if_requested("after_provision")
             self.deploy_workload()
             self.deploy_monitoring()
+            self.wait_for_required_metrics()
             self.fail_if_requested("after_monitoring_ready")
             self.run_benchmark_window()
+            self.update_monitoring_benchmark_window()
             self.fail_if_requested("before_extract")
             self.extract_and_summarize()
         except Exception as exc:
@@ -146,6 +150,8 @@ class LocalBenchmark:
         return 0
 
     def provision(self) -> None:
+        self.validate_kubernetes_context()
+
         terraform_dir = self.config.terraform_dir
         self.runner.run(["terraform", "init", "-input=false"], cwd=terraform_dir)
         self.runner.run(["terraform", "validate"], cwd=terraform_dir)
@@ -168,6 +174,7 @@ class LocalBenchmark:
             cwd=terraform_dir,
             check=False,
             capture=True,
+            log_path=self.config.artifacts_dir / "terraform-apply.log",
         )
         self.write_provision_status(
             {
@@ -177,7 +184,12 @@ class LocalBenchmark:
             append=True,
         )
         if result.returncode != 0:
-            raise LocalBenchmarkError("terraform apply failed")
+            detail = summarize_command_failure(result)
+            suffix = f": {detail}" if detail else ""
+            raise LocalBenchmarkError(
+                "terraform apply failed; inspect artifacts/terraform-apply.log"
+                f"{suffix}"
+            )
 
         outputs = self.terraform_outputs()
         self.config.run_id = output_value(outputs, "run_id", self.config.run_id)
@@ -211,6 +223,41 @@ class LocalBenchmark:
                 "name_prefix": output_value(outputs, "name_prefix", ""),
             },
         )
+
+    def validate_kubernetes_context(self) -> None:
+        result = self.runner.run(
+            [
+                "kubectl",
+                "get",
+                "nodes",
+                "--context",
+                self.config.kube_context,
+                "--request-timeout=10s",
+            ],
+            check=False,
+            capture=True,
+        )
+        if result.returncode == 0:
+            return
+
+        status = self.runner.run(
+            ["minikube", "status", "--profile", self.config.kube_context],
+            check=False,
+            capture=True,
+        )
+        details = summarize_command_failure(result)
+        minikube_status = summarize_command_failure(status)
+        message = (
+            f"Kubernetes context {self.config.kube_context!r} is not reachable before "
+            "Terraform apply. Start or repair the devcontainer-managed minikube profile "
+            f"with `.devcontainer/post-create.sh` or `minikube start --profile "
+            f"{self.config.kube_context}`."
+        )
+        if details:
+            message += f" kubectl reported: {details}."
+        if minikube_status:
+            message += f" minikube status: {minikube_status}."
+        raise LocalBenchmarkError(message)
 
     def terraform_vars(self) -> list[str]:
         return [
@@ -323,6 +370,12 @@ class LocalBenchmark:
                 "kubectl",
                 "rollout",
                 "status",
+                "deployment/sb-monitoring-grafana",
+            ],
+            [
+                "kubectl",
+                "rollout",
+                "status",
                 "deployment/sb-monitoring-kube-state-metrics",
             ],
             [
@@ -364,6 +417,48 @@ class LocalBenchmark:
             ]
         )
 
+    def wait_for_required_metrics(self) -> None:
+        readiness_path = self.config.artifacts_dir / "prometheus-metrics-readiness.json"
+        with self.port_forward_prometheus():
+            for attempt in range(1, 41):
+                end = utc_now()
+                start = utc_offset(seconds=-60)
+                result = self.runner.run(
+                    [
+                        sys.executable,
+                        "automation/scripts/extract_prometheus_metrics.py",
+                        "--prometheus-url",
+                        f"http://127.0.0.1:{self.config.prometheus_port}",
+                        "--run-id",
+                        self.config.run_id,
+                        "--namespace",
+                        self.config.namespace,
+                        "--start",
+                        start,
+                        "--end",
+                        end,
+                        "--step",
+                        "15s",
+                        "--output",
+                        str(readiness_path),
+                        "--strict",
+                    ],
+                    cwd=REPO_ROOT,
+                    check=False,
+                    capture=True,
+                )
+                if result.returncode == 0:
+                    return
+                if attempt == 40:
+                    detail = summarize_command_failure(result)
+                    suffix = f": {detail}" if detail else ""
+                    raise LocalBenchmarkError(
+                        "Prometheus required metrics did not become ready before "
+                        "the benchmark window; inspect "
+                        f"{readiness_path}{suffix}"
+                    )
+                self.sleep(15)
+
     def run_benchmark_window(self) -> None:
         self.runner.run(
             [
@@ -394,8 +489,30 @@ class LocalBenchmark:
         self.sleep(self.config.test_duration_seconds)
         self.config.benchmark_end = utc_now()
 
+    def update_monitoring_benchmark_window(self) -> None:
+        self.runner.run(
+            [
+                "helm",
+                "upgrade",
+                "--install",
+                self.config.monitoring_release,
+                str(self.config.monitoring_chart),
+                "--namespace",
+                self.config.namespace,
+                "--kube-context",
+                self.config.kube_context,
+                "--reuse-values",
+                "--set-string",
+                f"siliconBoutique.benchmarkStart={self.config.benchmark_start}",
+                "--set-string",
+                f"siliconBoutique.benchmarkEnd={self.config.benchmark_end}",
+            ]
+        )
+
     def extract_and_summarize(self) -> None:
         metrics_path = self.config.artifacts_dir / "prometheus-metrics.json"
+        loadgenerator_logs_path = self.config.artifacts_dir / "loadgenerator.log"
+        loadgenerator_stats_path = self.config.artifacts_dir / "loadgenerator-stats.json"
         summary_path = self.config.artifacts_dir / "benchmark-summary.json"
         summary_store_path = self.config.artifacts_dir / "benchmark-summaries.ndjson"
         report_path = self.config.artifacts_dir / "comparability-report.json"
@@ -423,12 +540,41 @@ class LocalBenchmark:
                 ],
                 cwd=REPO_ROOT,
             )
+        logs = self.runner.run(
+            [
+                "kubectl",
+                "logs",
+                "deployment/loadgenerator",
+                "--namespace",
+                self.config.namespace,
+                "--context",
+                self.config.kube_context,
+            ],
+            capture=True,
+        )
+        loadgenerator_logs_path.write_text(logs.stdout, encoding="utf-8")
+        self.runner.run(
+            [
+                sys.executable,
+                "automation/scripts/extract_loadgenerator_stats.py",
+                "--logs-input",
+                str(loadgenerator_logs_path),
+                "--output",
+                str(loadgenerator_stats_path),
+                "--run-id",
+                self.config.run_id,
+                "--strict",
+            ],
+            cwd=REPO_ROOT,
+        )
         self.runner.run(
             [
                 sys.executable,
                 "automation/scripts/generate_benchmark_summary.py",
                 "--metrics-input",
                 str(metrics_path),
+                "--loadgenerator-stats",
+                str(loadgenerator_stats_path),
                 "--summary-output",
                 str(summary_path),
                 "--summary-store",
@@ -443,6 +589,16 @@ class LocalBenchmark:
                 self.config.architecture,
                 "--cloud-provider",
                 self.config.cloud_provider,
+                "--node-count",
+                str(self.config.node_count),
+                "--pricing-model",
+                self.config.pricing_model,
+                "--concurrent-users",
+                self.config.concurrent_users,
+                "--users-per-second",
+                self.config.users_per_second,
+                "--load-profile-source",
+                self.config.load_profile_source,
                 "--strict",
             ],
             cwd=REPO_ROOT,
@@ -457,6 +613,8 @@ class LocalBenchmark:
                 "automation/templates/benchmark-summary.schema.json",
                 "--report-output",
                 str(report_path),
+                "--run-id",
+                self.config.run_id,
                 "--mode",
                 "summary",
                 "--min-duration-seconds",
@@ -665,6 +823,9 @@ class LocalBenchmark:
                 "architecture": self.config.architecture,
                 "benchmark_start": self.config.benchmark_start,
                 "benchmark_end": self.config.benchmark_end,
+                "load_concurrent_users": self.config.concurrent_users,
+                "load_users_per_second": self.config.users_per_second,
+                "load_profile_source": self.config.load_profile_source,
             },
             "gcp": {
                 "project_id": "",
@@ -675,9 +836,11 @@ class LocalBenchmark:
                 "artifact_name": self.config.summary_artifact_name,
                 "summary_path": str(summary_path),
                 "summary_store_path": str(summary_store_path),
+                "loadgenerator_stats_path": str(artifacts_dir / "loadgenerator-stats.json"),
                 "trace_path": str(trace_path),
                 "summary_exists": bool_string(summary_path.exists()),
                 "summary_store_exists": bool_string(summary_store_path.exists()),
+                "loadgenerator_stats_exists": bool_string((artifacts_dir / "loadgenerator-stats.json").exists()),
             },
             "teardown": {
                 "destroy_attempted": self.config.destroy_attempted,
@@ -706,6 +869,7 @@ class LocalBenchmark:
                 "summary_artifact_name": self.config.summary_artifact_name,
                 "summary_path": str(summary_path),
                 "summary_store_path": str(summary_store_path),
+                "loadgenerator_stats_path": str(artifacts_dir / "loadgenerator-stats.json"),
                 "trace_path": str(trace_path),
                 "teardown_succeeded": self.config.destroy_succeeded,
                 "destroy_attempted": self.config.destroy_attempted,
@@ -750,6 +914,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--concurrent-users", default="10")
     parser.add_argument("--users-per-second", default="1")
     parser.add_argument("--test-duration", default="20m")
+    parser.add_argument("--pricing-model", default="none")
+    parser.add_argument(
+        "--load-profile-file",
+        type=Path,
+        help="Use load_concurrent_users and load_users_per_second from a calibration JSON file.",
+    )
     parser.add_argument("--prometheus-port", type=int, default=9090)
     parser.add_argument("--min-duration-seconds", type=int, default=1200)
     parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
@@ -786,6 +956,18 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
+    load_profile = load_profile_from_file(args.load_profile_file)
+    concurrent_users = str(
+        load_profile.get("load_concurrent_users", args.concurrent_users)
+    )
+    users_per_second = str(
+        load_profile.get("load_users_per_second", args.users_per_second)
+    )
+    load_profile_source = (
+        str(load_profile.get("load_profile_source") or args.load_profile_file)
+        if args.load_profile_file
+        else "manual"
+    )
     return BenchmarkConfig(
         run_id=args.run_id,
         artifacts_dir=args.artifacts_dir,
@@ -798,16 +980,27 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         processor_family=args.processor_family,
         architecture=args.architecture,
         node_count=args.node_count,
-        concurrent_users=args.concurrent_users,
-        users_per_second=args.users_per_second,
+        concurrent_users=concurrent_users,
+        users_per_second=users_per_second,
         test_duration=args.test_duration,
         test_duration_seconds=parse_duration_seconds(args.test_duration),
+        pricing_model=args.pricing_model,
+        load_profile_source=load_profile_source,
         prometheus_port=args.prometheus_port,
         min_duration_seconds=args.min_duration_seconds,
         min_coverage_ratio=args.min_coverage_ratio,
         failure_stage=args.failure_stage,
         skip_destroy=args.skip_destroy,
     )
+
+
+def load_profile_from_file(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if "selected_profile" in payload and isinstance(payload["selected_profile"], dict):
+        payload = payload["selected_profile"]
+    return payload if isinstance(payload, dict) else {}
 
 
 def parse_duration_seconds(value: str) -> int:
@@ -872,8 +1065,27 @@ def append_text(path: Path, text: str) -> None:
         handle.write(text)
 
 
+def summarize_command_failure(result: CommandResult) -> str:
+    output = (result.stderr or result.stdout).strip()
+    if not output:
+        return ""
+    output = re.sub(r"\s+", " ", output)
+    if len(output) > 500:
+        return output[:497] + "..."
+    return output
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def utc_offset(*, seconds: int) -> str:
+    return (
+        (datetime.now(timezone.utc) + timedelta(seconds=seconds))
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def bool_string(value: bool) -> str:

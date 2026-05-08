@@ -13,16 +13,21 @@ This directory holds the GitHub Actions pipelines for benchmark orchestration.
 5. Observe the configured benchmark window.
 6. Extract Prometheus metrics.
 7. Generate and validate the benchmark summary.
-8. Uninstall Helm releases and destroy the Terraform-managed GCP environment.
-9. Capture traceability outputs.
-10. Upload benchmark artifacts.
+8. Persist the validated benchmark summary to BigQuery.
+9. Uninstall Helm releases and destroy the Terraform-managed GCP environment.
+10. Capture traceability outputs.
+11. Upload benchmark artifacts.
 
 The workflow expects these repository or environment secrets:
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT`
 
-Manual dispatch inputs include the GCP project, region, zone, machine type, node count, processor metadata, load-generator settings, and `failure_stage`. The workflow derives a DNS-safe `run_id` from the GitHub Actions run ID and attempt so Terraform resources, Kubernetes labels, and artifacts remain traceable.
+The service account must be able to create and tear down the ephemeral GKE resources and must have BigQuery permissions to inspect the summary table, query duplicate `run_id` values, and load rows. A project-level role set such as `roles/bigquery.jobUser` plus table-level data editor access on the summary table is sufficient for the P7.2 load step.
+
+Manual dispatch inputs include the GCP project, region, zone, machine type, node count, processor metadata, load-generator settings, `load_profile_source`, pricing model, BigQuery destination, and `failure_stage`. Use `load_profile_source=calibration` when applying a profile selected by `automation/scripts/calibrate_load_profile.py`. The workflow derives a DNS-safe `run_id` from the GitHub Actions run ID and attempt so Terraform resources, Kubernetes labels, artifacts, and BigQuery rows remain traceable.
+
+The durable BigQuery destination is configured with `bigquery_dataset`, `bigquery_table`, and `bigquery_location`. Defaults are `silicon_boutique`, `benchmark_summaries`, and `US`; provision that destination first with `infra/terraform/gcp-bigquery`.
 
 Use `failure_stage=none` for normal benchmark runs. Use `after_provision`, `after_monitoring_ready`, or `before_extract` only in branch validation to force a controlled failure and prove teardown still runs.
 
@@ -42,6 +47,7 @@ The job exposes non-secret traceability outputs for downstream workflow use:
 - `machine_type`, `processor_family`, and `architecture`
 - `benchmark_start` and `benchmark_end`
 - `summary_artifact_name`, `summary_path`, and `summary_store_path`
+- `bigquery_dataset`, `bigquery_table`, `bigquery_location`, `bigquery_summary_table`, and `bigquery_load_report_path`
 - `destroy_attempted`, `teardown_succeeded`, and `failure_stage`
 
 The workflow also writes the same traceability data to the GitHub step summary and to `workflow-trace.json` and `workflow-trace.env` in the uploaded artifact.
@@ -51,7 +57,10 @@ Artifacts are uploaded as `benchmark-gha-<github-run-id>-<attempt>` and include:
 - `prometheus-metrics.json`
 - `benchmark-summary.json`
 - `benchmark-summaries.ndjson`
+- `loadgenerator.log`
+- `loadgenerator-stats.json`
 - `comparability-report.json`
+- `bigquery-load-report.json`
 - Terraform metadata snapshots for managed resource names, labels, and teardown checks
 - `provision-status.env`
 - `helm-cleanup.log`

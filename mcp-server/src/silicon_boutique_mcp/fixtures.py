@@ -197,11 +197,21 @@ def summary_reference_from_row(row: dict[str, Any]) -> BenchmarkSummaryReference
         avg_cpu_usage_cores=number_or_none(row.get("avg_cpu_usage_cores")),
         max_cpu_usage_cores=number_or_none(row.get("max_cpu_usage_cores")),
         avg_cpu_utilization_pct=number_or_none(row.get("avg_cpu_utilization_pct")),
+        max_cpu_utilization_pct=number_or_none(row.get("max_cpu_utilization_pct")),
         max_memory_used_gb=number_or_none(row.get("max_memory_used_gb")),
         frontend_latency_p50_ms=number_or_none(row.get("frontend_latency_p50_ms")),
         frontend_latency_p95_ms=number_or_none(row.get("frontend_latency_p95_ms")),
         frontend_latency_p99_ms=number_or_none(row.get("frontend_latency_p99_ms")),
         frontend_latency_max_ms=number_or_none(row.get("frontend_latency_max_ms")),
+        request_count_total=int_or_none(row.get("request_count_total")),
+        request_success_count=int_or_none(row.get("request_success_count")),
+        request_failure_count=int_or_none(row.get("request_failure_count")),
+        avg_requests_per_second=number_or_none(row.get("avg_requests_per_second")),
+        load_concurrent_users=int_or_none(row.get("load_concurrent_users")),
+        load_users_per_second=number_or_none(row.get("load_users_per_second")),
+        load_profile_source=string_or_none(row.get("load_profile_source")),
+        node_hourly_price_usd=number_or_none(row.get("node_hourly_price_usd")),
+        benchmark_compute_cost_usd=number_or_none(row.get("benchmark_compute_cost_usd")),
         cost_per_1m_requests_usd=number_or_none(row.get("cost_per_1m_requests_usd")),
         metrics_coverage_ratio=number_or_none(row.get("metrics_coverage_ratio")),
         missing_metrics=tuple(row.get("missing_metrics") or ()),
@@ -229,6 +239,14 @@ def number_or_none(value: object) -> float | None:
         return None
     if isinstance(value, int | float):
         return float(value)
+    return None
+
+
+def int_or_none(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
     return None
 
 

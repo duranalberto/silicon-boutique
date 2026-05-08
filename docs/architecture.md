@@ -6,7 +6,7 @@ SiliconBoutique is organized around a benchmark pipeline with a clear separation
 
 ## Main Parts
 
-- `infra/`: provisions ephemeral infrastructure for local Kubernetes validation and the GCP rollout path.
+- `infra/`: provisions ephemeral infrastructure for local Kubernetes validation and the GCP rollout path, plus durable BigQuery summary storage.
 - `k8s/`: packages the workload and monitoring stack for deployment.
 - `automation/`: extracts metrics and prepares benchmark summaries.
 - `.github/workflows/`: orchestrates provisioning, deployment, benchmark execution, extraction, and teardown.
@@ -18,7 +18,7 @@ SiliconBoutique is organized around a benchmark pipeline with a clear separation
 2. Terraform and Helm are exercised against the same workflow shape for local Kubernetes and GCP.
 3. The load generator runs a benchmark window.
 4. Automation gathers metrics and summarizes the run.
-5. Results are stored in local artifacts for comparison and fixture-backed agent queries; durable BigQuery history is roadmap work.
+5. Results are stored in local artifacts and, for GCP benchmark workflow runs, loaded into durable BigQuery history.
 6. The MCP boundary exposes status and historical query contracts through abstract ports, keeping GitHub Actions dispatch and summary storage adapters outside the service core.
 
 ## Design Notes

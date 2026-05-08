@@ -17,13 +17,25 @@ data:
       frontendTarget: {{ include "silicon-boutique-monitoring.frontendUrl" . | quote }}
     queries:
       cpuUsageCores: |
-        sum(rate(container_cpu_usage_seconds_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        sum(rate(container_cpu_usage_seconds_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", pod!=""}[5m]))
+      workloadNodeCpuCores: |
+        sum(
+          (
+            kube_node_status_allocatable{resource="cpu", unit="core"}
+            or on(node)
+            kube_node_status_capacity{resource="cpu", unit="core"}
+          )
+          * on(node) group_left()
+          max by (node) (kube_pod_info{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", node!=""})
+        )
+      cpuUtilizationPct: |
+        100 * silicon_boutique:workload_cpu_usage_cores:rate5m / silicon_boutique:workload_node_cpu_cores
       memoryWorkingSetBytes: |
-        sum(container_memory_working_set_bytes{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""})
+        sum(container_memory_working_set_bytes{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", pod!=""})
       cpuThrottlingRatio: |
-        sum(rate(container_cpu_cfs_throttled_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        sum(rate(container_cpu_cfs_throttled_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", pod!=""}[5m]))
         /
-        sum(rate(container_cpu_cfs_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", container!="", image!=""}[5m]))
+        sum(rate(container_cpu_cfs_periods_total{namespace="{{ .Values.siliconBoutique.workloadNamespace }}", pod!=""}[5m]))
       podMetadata: |
         kube_pod_info{namespace="{{ .Values.siliconBoutique.workloadNamespace }}"}
       readinessRatio: |
