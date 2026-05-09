@@ -32,6 +32,11 @@ on:
         required: true
         default: e2
         type: string
+      cpu_platform:
+        description: Optional provider-specific CPU platform label for summary comparison.
+        required: false
+        default: ""
+        type: string
       architecture:
         description: Processor architecture label for summary comparison.
         required: true
@@ -124,7 +129,10 @@ jobs:
       zone: ${{ steps.traceability.outputs.zone }}
       machine_type: ${{ steps.traceability.outputs.machine_type }}
       processor_family: ${{ steps.traceability.outputs.processor_family }}
+      cpu_platform: ${{ steps.traceability.outputs.cpu_platform }}
       architecture: ${{ steps.traceability.outputs.architecture }}
+      node_count: ${{ steps.traceability.outputs.node_count }}
+      pricing_model: ${{ steps.traceability.outputs.pricing_model }}
       namespace: ${{ steps.traceability.outputs.namespace }}
       benchmark_start: ${{ steps.traceability.outputs.benchmark_start }}
       benchmark_end: ${{ steps.traceability.outputs.benchmark_end }}
@@ -155,6 +163,7 @@ jobs:
       MACHINE_TYPE: ${{ inputs.machine_type }}
       NODE_COUNT: ${{ inputs.node_count }}
       PROCESSOR_FAMILY: ${{ inputs.processor_family }}
+      CPU_PLATFORM: ${{ inputs.cpu_platform }}
       ARCHITECTURE: ${{ inputs.architecture }}
       CONCURRENT_USERS: ${{ inputs.concurrent_users }}
       USERS_PER_SECOND: ${{ inputs.users_per_second }}
@@ -225,11 +234,25 @@ jobs:
             exit 1
           fi
 
+          case "$PRICING_MODEL" in
+            spot)
+              enable_spot_nodes=true
+              ;;
+            on_demand)
+              enable_spot_nodes=false
+              ;;
+            *)
+              echo "pricing_model must be spot or on_demand for GCP runs. Got: $PRICING_MODEL" >&2
+              exit 1
+              ;;
+          esac
+
           mkdir -p "$ARTIFACTS_DIR"
           {
             echo "RUN_ID=$run_id"
             echo "NAMESPACE=$run_id"
             echo "TEST_DURATION_SECONDS=$duration_seconds"
+            echo "ENABLE_SPOT_NODES=$enable_spot_nodes"
           } >> "$GITHUB_ENV"
 
       - name: Initialize Terraform
@@ -265,7 +288,8 @@ jobs:
             -var="machine_type=$MACHINE_TYPE" \
             -var="node_count=$NODE_COUNT" \
             -var="processor_family=$PROCESSOR_FAMILY" \
-            -var="architecture=$ARCHITECTURE"
+            -var="architecture=$ARCHITECTURE" \
+            -var="enable_spot_nodes=$ENABLE_SPOT_NODES"
           apply_exit_code="$?"
           set -e
 
@@ -468,8 +492,10 @@ jobs:
             --architecture "$ARCHITECTURE" \
             --cloud-provider gcp \
             --region "$REGION" \
+            --zone "$ZONE" \
             --node-count "$NODE_COUNT" \
             --pricing-model "$PRICING_MODEL" \
+            --cpu-platform "$CPU_PLATFORM" \
             --pricing-table automation/templates/machine-pricing.json \
             --concurrent-users "$CONCURRENT_USERS" \
             --users-per-second "$USERS_PER_SECOND" \
@@ -529,7 +555,12 @@ jobs:
                   "namespace": os.environ.get("NAMESPACE", ""),
                   "machine_type": os.environ.get("MACHINE_TYPE", ""),
                   "processor_family": os.environ.get("PROCESSOR_FAMILY", ""),
+                  "cpu_platform": os.environ.get("CPU_PLATFORM", "") or None,
                   "architecture": os.environ.get("ARCHITECTURE", ""),
+                  "region": os.environ.get("REGION", ""),
+                  "zone": os.environ.get("ZONE", ""),
+                  "node_count": os.environ.get("NODE_COUNT", ""),
+                  "pricing_model": os.environ.get("PRICING_MODEL", ""),
                   "benchmark_start": os.environ.get("BENCHMARK_START", ""),
                   "benchmark_end": os.environ.get("BENCHMARK_END", ""),
                   "load_concurrent_users": os.environ.get("CONCURRENT_USERS", ""),
@@ -720,7 +751,8 @@ jobs:
             -var="machine_type=$MACHINE_TYPE" \
             -var="node_count=$NODE_COUNT" \
             -var="processor_family=$PROCESSOR_FAMILY" \
-            -var="architecture=$ARCHITECTURE" >> "$teardown_log" 2>&1
+            -var="architecture=$ARCHITECTURE" \
+            -var="enable_spot_nodes=$ENABLE_SPOT_NODES" >> "$teardown_log" 2>&1
           destroy_exit_code="$?"
 
           {
@@ -828,7 +860,12 @@ jobs:
                   "namespace": os.environ.get("NAMESPACE", ""),
                   "machine_type": os.environ.get("MACHINE_TYPE", ""),
                   "processor_family": os.environ.get("PROCESSOR_FAMILY", ""),
+                  "cpu_platform": os.environ.get("CPU_PLATFORM", "") or None,
                   "architecture": os.environ.get("ARCHITECTURE", ""),
+                  "region": os.environ.get("REGION", ""),
+                  "zone": os.environ.get("ZONE", ""),
+                  "node_count": os.environ.get("NODE_COUNT", ""),
+                  "pricing_model": os.environ.get("PRICING_MODEL", ""),
                   "benchmark_start": os.environ.get("TRACE_BENCHMARK_START", ""),
                   "benchmark_end": os.environ.get("TRACE_BENCHMARK_END", ""),
                   "load_concurrent_users": os.environ.get("CONCURRENT_USERS", ""),
@@ -882,7 +919,10 @@ jobs:
             echo "zone=${ZONE:-}"
             echo "machine_type=${MACHINE_TYPE:-}"
             echo "processor_family=${PROCESSOR_FAMILY:-}"
+            echo "cpu_platform=${CPU_PLATFORM:-}"
             echo "architecture=${ARCHITECTURE:-}"
+            echo "node_count=${NODE_COUNT:-}"
+            echo "pricing_model=${PRICING_MODEL:-}"
             echo "namespace=${NAMESPACE:-}"
             echo "benchmark_start=$benchmark_start"
             echo "benchmark_end=$benchmark_end"
@@ -913,7 +953,10 @@ jobs:
             echo "| artifact | \`$SUMMARY_ARTIFACT_NAME\` |"
             echo "| machine_type | \`${MACHINE_TYPE:-}\` |"
             echo "| processor_family | \`${PROCESSOR_FAMILY:-}\` |"
+            echo "| cpu_platform | \`${CPU_PLATFORM:-}\` |"
             echo "| architecture | \`${ARCHITECTURE:-}\` |"
+            echo "| node_count | \`${NODE_COUNT:-}\` |"
+            echo "| pricing_model | \`${PRICING_MODEL:-}\` |"
             echo "| benchmark_start | \`$benchmark_start\` |"
             echo "| benchmark_end | \`$benchmark_end\` |"
             echo "| summary_path | \`$summary_path\` |"

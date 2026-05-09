@@ -46,6 +46,7 @@ All label-capable resources must carry the run metadata needed for traceability:
 - `machine_type` or `silicon-boutique/machine-type`
 - `processor_family` or `silicon-boutique/processor-family`
 - `architecture` or `silicon-boutique/architecture`
+- Canonical summary rows must also include normalized `region`, `zone`, `node_count`, `pricing_model`, `load_profile_source`, and optional `cpu_platform`.
 - `managed_by=terraform` where the platform supports plain GCP labels
 
 The Terraform roots expose the rendered labels and selectors with `terraform output labels`, `terraform output kubernetes_label_selector`, or `terraform output gcp_label_filter`.
@@ -323,14 +324,17 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --processor-family "$processor_family" \
   --architecture "$architecture" \
   --cloud-provider local \
+  --region local \
+  --zone local \
   --node-count 1 \
+  --pricing-model local \
   --concurrent-users "$concurrent_users" \
   --users-per-second "$users_per_second" \
   --load-profile-source manual \
   --strict
 ```
 
-For GCP summaries, pass `--region`, `--pricing-model`, and `--pricing-table automation/templates/machine-pricing.json` so `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` are populated from the repo-owned pricing table.
+For GCP summaries, pass `--region`, `--zone`, `--pricing-model`, optional `--cpu-platform`, and `--pricing-table automation/templates/machine-pricing.json` so `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` are populated from the repo-owned pricing table. The GCP workflow maps `pricing_model=spot` to Spot nodes and `pricing_model=on_demand` to regular on-demand nodes.
 
 To calibrate local load settings before a comparison run:
 
@@ -374,7 +378,36 @@ python3 automation/scripts/validate_benchmark_comparability.py \
   --strict
 ```
 
-Before using accumulated rows for cross-machine comparisons, rerun the same validator without `--run-id` and with `--mode comparability`; that mode validates the historical store and requires at least two comparable rows.
+Before using accumulated rows for cross-machine comparisons, rerun the same validator without `--run-id` and with `--mode comparability`; that mode validates the historical store and requires at least two comparable rows. For local-only Phase 8 acceptance, prefer the split-evidence helper because `artifacts/benchmark-summaries.ndjson` can contain legacy, smoke, or demo rows:
+
+```bash
+python3 automation/scripts/validate_phase8_local.py
+```
+
+The helper writes valid-only comparability evidence and mixed comparison-report evidence under `artifacts/phase8-local-validation/`. Treat `pass` on the valid-only `comparability-report.json` as the quality gate, `warn` on the mixed `comparison-report.json` as expected when rejected-row evidence is present, and `fail` as a blocked comparison with no usable groups or schema drift.
+
+Generate a historical comparison report from local NDJSON rows when you want ranked CPU, memory, latency, throughput, cost, and quality tables without opening a spreadsheet:
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
+```
+
+For durable BigQuery history, query the benchmark summary table directly. Add filters such as `--machine-type`, `--processor-family`, `--architecture`, `--cloud-provider`, `--pricing-model`, or `--limit` to narrow the comparison set:
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --project-id "$project_id" \
+  --dataset-id silicon_boutique \
+  --table-id benchmark_summaries \
+  --location US \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
+```
 
 Clean up monitoring before uninstalling the workload and destroying the Terraform-owned namespace:
 
@@ -393,13 +426,28 @@ terraform destroy -auto-approve
 ## Cloud Rollout
 
 1. Use GCP for the first cloud benchmark target after local validation is complete.
-2. Confirm cloud credentials and Terraform state are configured before applying.
-3. Run the same deployment and benchmark flow used in local Kubernetes.
-4. Preserve teardown discipline to avoid leaving cloud resources running.
+2. Treat AWS EKS as scaffolded until credentials, IAM, live apply, and teardown are explicitly promoted.
+3. Confirm cloud credentials and Terraform state are configured before applying.
+4. Run the same deployment and benchmark flow used in local Kubernetes.
+5. Preserve teardown discipline to avoid leaving cloud resources running.
+
+Validate the AWS EKS scaffold without AWS credentials:
+
+```bash
+cd infra/terraform/aws-eks
+terraform fmt -check -recursive
+terraform init -backend=false -input=false
+terraform validate
+terraform plan -refresh=false -input=false
+```
+
+The AWS root exports the same run metadata used by the GCP workflow, including `cloud_provider=aws`, region, zone, machine type, processor metadata, node count, pricing model, `get_credentials_command`, tags, managed resource names, and teardown check commands. Live AWS execution requires AWS credentials and the `aws` CLI to run `aws eks update-kubeconfig`; do not apply or destroy the scaffold without a confirmed teardown window.
 
 ## GitHub Actions Benchmark Workflow
 
 The Phase 4 workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch` so future MCP tooling can trigger the same orchestration boundary through the GitHub Actions API.
+
+`.github/workflows/benchmark-aws.yml` is scaffold-only. It runs Terraform static validation for `infra/terraform/aws-eks` and records the intended AWS metadata, but it does not authenticate to AWS, apply resources, deploy Helm charts, run benchmarks, or load BigQuery rows.
 
 Before dispatching the workflow, configure GitHub OIDC for GCP and provide these repository or environment secrets:
 
@@ -411,7 +459,7 @@ The workflow service account needs permissions for the ephemeral GKE benchmark r
 Dispatch inputs include:
 
 - `project_id`, `region`, and `zone`
-- `machine_type`, `node_count`, `processor_family`, and `architecture`
+- `machine_type`, `node_count`, `processor_family`, optional `cpu_platform`, `architecture`, and `pricing_model`
 - `concurrent_users`, `users_per_second`, and `test_duration`
 - `bigquery_dataset`, `bigquery_table`, and `bigquery_location`, which default to `silicon_boutique`, `benchmark_summaries`, and `US`
 - `failure_stage`, which defaults to `none`

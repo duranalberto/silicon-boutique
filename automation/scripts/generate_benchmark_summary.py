@@ -60,9 +60,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processor-family", required=True)
     parser.add_argument("--architecture", required=True)
     parser.add_argument("--cloud-provider", required=True)
-    parser.add_argument("--region", default=None)
+    parser.add_argument("--region", default="local")
+    parser.add_argument("--zone", default="local")
     parser.add_argument("--node-count", type=int, default=1)
-    parser.add_argument("--pricing-model", default="spot")
+    parser.add_argument("--pricing-model", default="local")
+    parser.add_argument("--cpu-platform", default=None)
     parser.add_argument("--concurrent-users")
     parser.add_argument("--users-per-second")
     parser.add_argument("--load-profile-source", default="manual")
@@ -103,8 +105,10 @@ def main() -> int:
             architecture=args.architecture,
             cloud_provider=args.cloud_provider,
             region=args.region,
+            zone=args.zone,
             node_count=args.node_count,
             pricing_model=args.pricing_model,
+            cpu_platform=args.cpu_platform,
             concurrent_users=args.concurrent_users,
             users_per_second=args.users_per_second,
             load_profile_source=args.load_profile_source,
@@ -142,8 +146,10 @@ def build_summary(
     architecture: str,
     cloud_provider: str,
     region: str | None,
+    zone: str | None,
     node_count: int,
     pricing_model: str,
+    cpu_platform: str | None,
     concurrent_users: str | None,
     users_per_second: str | None,
     load_profile_source: str,
@@ -155,6 +161,7 @@ def build_summary(
     benchmark_start = normalize_timestamp(window.get("start"))
     benchmark_end = normalize_timestamp(window.get("end"))
     duration = duration_seconds(benchmark_start, benchmark_end)
+    normalized_pricing_model = normalize_pricing_model(pricing_model)
     request_total = int_or_none(
         (loadgenerator_stats or {}).get("request_count_total")
     )
@@ -172,7 +179,7 @@ def build_summary(
         cloud_provider=cloud_provider,
         region=region,
         machine_type=machine_type,
-        pricing_model=pricing_model,
+        pricing_model=normalized_pricing_model,
     )
     compute_cost = benchmark_compute_cost(
         node_hourly_price_usd=node_hourly_price,
@@ -187,7 +194,12 @@ def build_summary(
         "cloud_provider": clean_required_value(cloud_provider),
         "machine_type": clean_required_value(machine_type),
         "processor_family": clean_required_value(processor_family),
+        "cpu_platform": clean_optional_value(cpu_platform),
         "architecture": clean_required_value(architecture),
+        "region": clean_required_value(region),
+        "zone": clean_required_value(zone),
+        "node_count": node_count,
+        "pricing_model": normalized_pricing_model,
         "benchmark_start": benchmark_start,
         "benchmark_end": benchmark_end,
         "duration_seconds": duration,
@@ -255,9 +267,12 @@ def validate_summary(summary: dict[str, Any], *, strict: bool) -> None:
         "namespace",
         "environment",
         "cloud_provider",
+        "region",
+        "zone",
         "machine_type",
         "processor_family",
         "architecture",
+        "pricing_model",
     )
     missing_identity = [
         field for field in identity_fields if not clean_required_value(summary.get(field))
@@ -266,6 +281,10 @@ def validate_summary(summary: dict[str, Any], *, strict: bool) -> None:
         raise SummaryError(
             "required identity metadata is missing: " + ", ".join(missing_identity)
         )
+    if int_or_none(summary.get("node_count")) is None or int(summary["node_count"]) < 1:
+        raise SummaryError("node_count must be a positive integer")
+    if summary.get("pricing_model") not in {"local", "spot", "on_demand"}:
+        raise SummaryError("pricing_model must be local, spot, or on_demand")
 
     if not strict:
         return
@@ -427,6 +446,15 @@ def cost_per_1m_requests(
     return round(compute_cost_usd / request_success_count * 1_000_000, 8)
 
 
+def normalize_pricing_model(value: Any) -> str | None:
+    cleaned = clean_required_value(value)
+    if cleaned is None:
+        return None
+    if cleaned == "none":
+        return "local"
+    return cleaned
+
+
 def int_or_none(value: Any) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -521,6 +549,15 @@ def utc_now() -> str:
 def clean_required_value(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def clean_optional_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return str(value)
     cleaned = value.strip()
     return cleaned or None
 

@@ -28,6 +28,7 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
             "benchmark_start": "2026-05-07T12:00:00Z",
             "cloud_provider": "local",
             "cost_per_1m_requests_usd": None,
+            "cpu_platform": None,
             "duration_seconds": 1200,
             "empty_metrics": [],
             "environment": "local",
@@ -52,12 +53,16 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
             "min_ready_pods": 11.0,
             "missing_metrics": [],
             "namespace": f"sb-{run_id}",
+            "node_count": 1,
             "node_hourly_price_usd": None,
+            "pricing_model": "local",
             "processor_family": "local-dev",
+            "region": "local",
             "request_count_total": 300,
             "request_failure_count": 5,
             "request_success_count": 295,
             "run_id": run_id,
+            "zone": "local",
             "summary_status": "complete",
         }
 
@@ -245,6 +250,49 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
             "missing_baseline_labels:machine_type",
             report["rejected_runs"][0]["reasons"],
         )
+
+    def test_missing_normalized_metadata_fails(self):
+        row = self.valid_summary()
+        row["region"] = ""
+        row["zone"] = ""
+        row["pricing_model"] = ""
+
+        result, report = self.run_validator([row, self.valid_summary("run-b")], "--strict")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "missing_baseline_labels:region,zone,pricing_model",
+            report["rejected_runs"][0]["reasons"],
+        )
+
+    def test_invalid_node_count_fails(self):
+        row = self.valid_summary()
+        row["node_count"] = 0
+
+        result, report = self.run_validator([row, self.valid_summary("run-b")], "--strict")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid_node_count", report["rejected_runs"][0]["reasons"])
+
+    def test_invalid_pricing_model_fails(self):
+        row = self.valid_summary()
+        row["pricing_model"] = "preemptible"
+
+        result, report = self.run_validator([row, self.valid_summary("run-b")], "--strict")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid_pricing_model", report["rejected_runs"][0]["reasons"])
+
+    def test_nullable_cpu_platform_is_accepted(self):
+        row_a = self.valid_summary("run-a")
+        row_b = self.valid_summary("run-b")
+        row_a["cpu_platform"] = None
+        row_b["cpu_platform"] = None
+
+        result, report = self.run_validator([row_a, row_b], "--strict")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["comparability_status"], "pass")
 
     def test_schema_extra_field_fails_as_drift(self):
         row = self.valid_summary()

@@ -17,6 +17,42 @@
       "hourly_usd": 0.0402,
       "currency": "USD",
       "source_note": "Static SiliconBoutique fixture spot rate using 30% of on-demand for P7.4."
+    },
+    {
+      "cloud_provider": "aws",
+      "region": "us-east-1",
+      "machine_type": "m7i.xlarge",
+      "pricing_model": "on_demand",
+      "hourly_usd": 0.2016,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture rate for the P8.3 AWS EKS scaffold."
+    },
+    {
+      "cloud_provider": "aws",
+      "region": "us-east-1",
+      "machine_type": "m7i.xlarge",
+      "pricing_model": "spot",
+      "hourly_usd": 0.06048,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture spot rate using 30% of on-demand for the P8.3 AWS EKS scaffold."
+    },
+    {
+      "cloud_provider": "aws",
+      "region": "us-east-1",
+      "machine_type": "c7g.xlarge",
+      "pricing_model": "on_demand",
+      "hourly_usd": 0.145,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture Arm rate for the P8.3 AWS EKS scaffold."
+    },
+    {
+      "cloud_provider": "aws",
+      "region": "us-east-1",
+      "machine_type": "c7g.xlarge",
+      "pricing_model": "spot",
+      "hourly_usd": 0.0435,
+      "currency": "USD",
+      "source_note": "Static SiliconBoutique fixture Arm spot rate using 30% of on-demand for the P8.3 AWS EKS scaffold."
     }
   ]
 }

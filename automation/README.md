@@ -87,16 +87,46 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --processor-family "$processor_family" \
   --architecture "$architecture" \
   --cloud-provider local \
+  --region local \
+  --zone local \
   --node-count 1 \
+  --pricing-model local \
   --concurrent-users "$concurrent_users" \
   --users-per-second "$users_per_second" \
   --load-profile-source manual \
   --strict
 ```
 
-For priced GCP runs, also pass `--region`, `--pricing-model`, and `--pricing-table automation/templates/machine-pricing.json`. The summary calculates `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` from successful request count, node count, duration, and hourly node price. Strict summary validation rejects impossible CPU utilization values and records both average and max utilization.
+For priced GCP runs, also pass `--region`, `--zone`, `--pricing-model`, optional `--cpu-platform`, and `--pricing-table automation/templates/machine-pricing.json`. The summary calculates `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` from successful request count, node count, duration, and hourly node price. Strict summary validation rejects impossible CPU utilization values and records both average and max utilization.
 
 The local summary store fails on duplicate `run_id` values by default. Use `--replace` only when intentionally regenerating a summary for the same benchmark run.
+
+## Comparison Reports
+
+Generate ranked comparison artifacts from accumulated local summaries:
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
+```
+
+The JSON report is the canonical machine-readable output. The Markdown report contains a compact table for humans. Both outputs group repeated runs by normalized provider, machine, processor, pricing, and load-profile metadata; rank latency, throughput, memory, CPU efficiency, cost, and run quality; and list rejected non-comparable runs instead of silently dropping them.
+
+Use BigQuery source mode for durable history:
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --project-id "$project_id" \
+  --dataset-id silicon_boutique \
+  --table-id benchmark_summaries \
+  --location US \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
+```
 
 ## Load Calibration
 
@@ -142,6 +172,23 @@ Use `--dry-run` with the same arguments to validate local input, table access, s
 `scripts/validate_bigquery_summary_load.py` is a guarded integration helper for test datasets. It loads one selected `run_id`, queries the same table for that row, writes `bigquery-validation-report.json`, and deletes only that exact test row when `--cleanup-row` is explicitly provided.
 
 ## Summary and Comparability Validation
+
+For local-only Phase 8 validation, use the dedicated helper instead of pointing
+the historical gate directly at `artifacts/benchmark-summaries.ndjson`. Local
+history can contain pre-P8.1, smoke, or demo rows, so the helper writes split
+evidence under `artifacts/phase8-local-validation/`: a valid-only store whose
+comparability report must pass, and a mixed store whose comparison report should
+warn while listing the intentional rejected partial row.
+
+```bash
+python3 automation/scripts/validate_phase8_local.py
+```
+
+Expected statuses are `pass` for
+`artifacts/phase8-local-validation/comparability-report.json`, `warn` for
+`artifacts/phase8-local-validation/comparison-report.json` when rejected-row
+evidence is present, and `fail` only when no comparable groups are available or
+schema drift blocks comparison.
 
 `scripts/validate_benchmark_comparability.py` has two validation modes. Use `--mode summary` for a fresh per-run artifact store that may contain only one summary row. It checks schema stability, stable baseline labels, complete metric quality, duration, and coverage without requiring a second run.
 

@@ -281,6 +281,8 @@ def terraform_outputs():
         "machine_type": {"value": "local"},
         "processor_family": {"value": "local"},
         "architecture": {"value": "x86_64"},
+        "region": {"value": "local"},
+        "node_count": {"value": 1},
         "kube_context": {"value": "siliconboutique"},
         "labels": {"value": {"run_id": "local-test"}},
         "teardown_check_commands": {"value": []},

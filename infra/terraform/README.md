@@ -7,6 +7,7 @@ Current roots:
 - `local-kubernetes/`: creates the local benchmark namespace in the devcontainer-managed `siliconboutique` minikube profile.
 - `gcp-gke/`: provisions the first GCP rollout path with a dedicated VPC, subnet, GKE cluster, and benchmark node pool.
 - `gcp-bigquery/`: provisions durable BigQuery benchmark summary history outside run-scoped teardown.
+- `aws-eks/`: static-validation scaffold for a future AWS EKS benchmark path using the same metadata and workload contract.
 
 ## Naming, Labels, and Teardown
 
@@ -15,6 +16,7 @@ Terraform roots use a shared run contract:
 - `run_id` is the durable benchmark identifier. Provide it explicitly for automation; otherwise Terraform generates one and keeps it stable in state.
 - Local Kubernetes resources use the `silicon-boutique-${run_id}` naming prefix.
 - GCP resources use the shorter `sb-${run_id}` naming prefix to leave room for provider suffixes.
+- AWS scaffold resources also use the shorter `sb-${run_id}` naming prefix and `RunId` tags.
 - Label-capable resources include run metadata for environment, machine type, processor family, architecture, and Terraform ownership.
 - Teardown-owned resources are marked with `destroy-after-run` metadata where the platform supports labels or annotations.
 
@@ -73,3 +75,17 @@ timeout 60s terraform plan -refresh=false -input=false -var='project_id=example-
 ```
 
 The default destination is `<project-id>.silicon_boutique.benchmark_summaries` in location `US`. The benchmark workflow service account needs permission to inspect the table, query duplicate `run_id` values, and load rows.
+
+## AWS EKS Scaffold
+
+The AWS root is scaffold-only for P8.3. It should validate without AWS credentials and should not be applied until AWS account access, IAM scope, and teardown expectations are explicitly reviewed.
+
+```bash
+cd infra/terraform/aws-eks
+timeout 20s terraform fmt -check -recursive
+timeout 60s terraform init -backend=false -input=false
+timeout 30s terraform validate
+timeout 60s terraform plan -refresh=false -input=false
+```
+
+Live AWS execution requires credentials outside Terraform state and uses the `get_credentials_command` output to configure kubeconfig after apply.

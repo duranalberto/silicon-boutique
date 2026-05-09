@@ -122,6 +122,11 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["summary_status"], "complete")
             self.assertEqual(summary["duration_seconds"], 60)
             self.assertEqual(summary["generated_at"], "2026-05-07T12:02:00Z")
+            self.assertEqual(summary["region"], "local")
+            self.assertEqual(summary["zone"], "local")
+            self.assertEqual(summary["node_count"], 1)
+            self.assertEqual(summary["pricing_model"], "local")
+            self.assertIsNone(summary["cpu_platform"])
             self.assertAlmostEqual(summary["avg_cpu_usage_cores"], 1.9)
             self.assertAlmostEqual(summary["avg_cpu_utilization_pct"], 47.5)
             self.assertAlmostEqual(summary["max_cpu_utilization_pct"], 62.5)
@@ -170,10 +175,14 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
                 "gcp",
                 "--region",
                 "us-central1",
+                "--zone",
+                "us-central1-a",
                 "--node-count",
                 "2",
                 "--pricing-model",
                 "spot",
+                "--cpu-platform",
+                "intel-sapphire-rapids",
                 "--pricing-table",
                 str(pricing),
                 "--strict",
@@ -181,6 +190,11 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads(summary_output.read_text(encoding="utf-8"))
+            self.assertEqual(summary["region"], "us-central1")
+            self.assertEqual(summary["zone"], "us-central1-a")
+            self.assertEqual(summary["node_count"], 2)
+            self.assertEqual(summary["pricing_model"], "spot")
+            self.assertEqual(summary["cpu_platform"], "intel-sapphire-rapids")
             self.assertAlmostEqual(summary["node_hourly_price_usd"], 0.03)
             self.assertAlmostEqual(summary["benchmark_compute_cost_usd"], 0.001)
             self.assertAlmostEqual(summary["cost_per_1m_requests_usd"], 3.38983051)
@@ -286,6 +300,8 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
                 "gcp",
                 "--region",
                 "us-central1",
+                "--zone",
+                "us-central1-a",
                 "--pricing-table",
                 str(pricing),
                 "--strict",

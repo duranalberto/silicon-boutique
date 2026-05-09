@@ -2,6 +2,10 @@
 
 This directory holds the GitHub Actions pipelines for benchmark orchestration.
 
+## AWS scaffold workflow
+
+`benchmark-aws.yml` validates the P8.3 AWS EKS scaffold through `workflow_dispatch`. It runs `terraform fmt`, `terraform init -backend=false`, `terraform validate`, and `terraform plan -refresh=false` for `infra/terraform/aws-eks` using static provider validation. It intentionally does not configure AWS credentials, apply resources, deploy Helm charts, run benchmarks, or persist BigQuery rows.
+
 ## Benchmark workflow
 
 `benchmark.yml` runs the GCP benchmark path through `workflow_dispatch`. It sequences the Phase 4 automation flow:
@@ -25,7 +29,7 @@ The workflow expects these repository or environment secrets:
 
 The service account must be able to create and tear down the ephemeral GKE resources and must have BigQuery permissions to inspect the summary table, query duplicate `run_id` values, and load rows. A project-level role set such as `roles/bigquery.jobUser` plus table-level data editor access on the summary table is sufficient for the P7.2 load step.
 
-Manual dispatch inputs include the GCP project, region, zone, machine type, node count, processor metadata, load-generator settings, `load_profile_source`, pricing model, BigQuery destination, and `failure_stage`. Use `load_profile_source=calibration` when applying a profile selected by `automation/scripts/calibrate_load_profile.py`. The workflow derives a DNS-safe `run_id` from the GitHub Actions run ID and attempt so Terraform resources, Kubernetes labels, artifacts, and BigQuery rows remain traceable.
+Manual dispatch inputs include the GCP project, region, zone, machine type, node count, processor metadata, optional CPU platform, load-generator settings, `load_profile_source`, pricing model, BigQuery destination, and `failure_stage`. Use `load_profile_source=calibration` when applying a profile selected by `automation/scripts/calibrate_load_profile.py`. The workflow derives a DNS-safe `run_id` from the GitHub Actions run ID and attempt so Terraform resources, Kubernetes labels, artifacts, and BigQuery rows remain traceable.
 
 The durable BigQuery destination is configured with `bigquery_dataset`, `bigquery_table`, and `bigquery_location`. Defaults are `silicon_boutique`, `benchmark_summaries`, and `US`; provision that destination first with `infra/terraform/gcp-bigquery`.
 
@@ -44,7 +48,7 @@ The job exposes non-secret traceability outputs for downstream workflow use:
 
 - `run_id`, `namespace`, `environment`, and `cloud_provider`
 - `project_id`, `region`, and `zone`
-- `machine_type`, `processor_family`, and `architecture`
+- `machine_type`, `processor_family`, optional `cpu_platform`, `architecture`, `node_count`, and `pricing_model`
 - `benchmark_start` and `benchmark_end`
 - `summary_artifact_name`, `summary_path`, and `summary_store_path`
 - `bigquery_dataset`, `bigquery_table`, `bigquery_location`, `bigquery_summary_table`, and `bigquery_load_report_path`

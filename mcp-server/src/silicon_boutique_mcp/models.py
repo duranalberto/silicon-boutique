@@ -45,6 +45,8 @@ class BenchmarkRunRequest:
     concurrent_users: int
     users_per_second: int
     test_duration: str
+    pricing_model: str = "spot"
+    cpu_platform: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,9 +57,14 @@ class WorkflowTrace:
     status: BenchmarkRunStatus
     environment: str
     cloud_provider: str
+    region: str
+    zone: str
     machine_type: str
     processor_family: str
     architecture: str
+    node_count: int | None = None
+    pricing_model: str | None = None
+    cpu_platform: str | None = None
     benchmark_start: str | None = None
     benchmark_end: str | None = None
     summary_artifact_name: str | None = None
@@ -76,7 +83,12 @@ class BenchmarkSummaryReference:
     processor_family: str
     architecture: str
     cloud_provider: str
+    region: str
+    zone: str
+    node_count: int
+    pricing_model: str
     summary_status: str
+    cpu_platform: str | None = None
     benchmark_start: str | None = None
     benchmark_end: str | None = None
     summary_location: str | None = None

@@ -33,6 +33,8 @@ class WorkflowTraceFixtureAdapter:
                 status=BenchmarkRunStatus.UNKNOWN,
                 environment="",
                 cloud_provider="",
+                region="",
+                zone="",
                 machine_type="",
                 processor_family="",
                 architecture="",
@@ -122,11 +124,20 @@ def workflow_trace_from_record(record: dict[str, Any], requested_run_id: str) ->
         cloud_provider=string_or_default(
             benchmark.get("cloud_provider") or record.get("cloud_provider")
         ),
+        region=string_or_default(benchmark.get("region") or record.get("region")),
+        zone=string_or_default(benchmark.get("zone") or record.get("zone")),
         machine_type=string_or_default(benchmark.get("machine_type") or record.get("machine_type")),
         processor_family=string_or_default(
             benchmark.get("processor_family") or record.get("processor_family")
         ),
         architecture=string_or_default(benchmark.get("architecture") or record.get("architecture")),
+        node_count=int_or_none(benchmark.get("node_count") or record.get("node_count")),
+        pricing_model=string_or_none(
+            benchmark.get("pricing_model") or record.get("pricing_model")
+        ),
+        cpu_platform=string_or_none(
+            benchmark.get("cpu_platform") or record.get("cpu_platform")
+        ),
         benchmark_start=string_or_none(
             benchmark.get("benchmark_start") or record.get("benchmark_start")
         ),
@@ -190,7 +201,12 @@ def summary_reference_from_row(row: dict[str, Any]) -> BenchmarkSummaryReference
         processor_family=string_or_default(row.get("processor_family")),
         architecture=string_or_default(row.get("architecture")),
         cloud_provider=string_or_default(row.get("cloud_provider")),
+        region=string_or_default(row.get("region")),
+        zone=string_or_default(row.get("zone")),
+        node_count=int_or_none(row.get("node_count")) or 0,
+        pricing_model=string_or_default(row.get("pricing_model")),
         summary_status=string_or_default(row.get("summary_status")),
+        cpu_platform=string_or_none(row.get("cpu_platform")),
         benchmark_start=string_or_none(row.get("benchmark_start")),
         benchmark_end=string_or_none(row.get("benchmark_end")),
         summary_location=string_or_none(row.get("summary_location")),
@@ -247,6 +263,11 @@ def int_or_none(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
     return None
 
 

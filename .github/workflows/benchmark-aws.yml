@@ -1,0 +1,133 @@
+name: Benchmark AWS Scaffold
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: AWS region for the scaffolded EKS benchmark resources.
+        required: true
+        default: us-east-1
+        type: string
+      zone:
+        description: Primary AWS availability zone for benchmark metadata.
+        required: true
+        default: us-east-1a
+        type: string
+      secondary_zone:
+        description: Secondary AWS availability zone for the EKS subnet set.
+        required: true
+        default: us-east-1b
+        type: string
+      machine_type:
+        description: EC2 instance type for the benchmark node group.
+        required: true
+        default: m7i.xlarge
+        type: string
+      node_count:
+        description: Number of EKS benchmark nodes.
+        required: true
+        default: "1"
+        type: string
+      processor_family:
+        description: Processor family label for summary comparison.
+        required: true
+        default: m7i
+        type: string
+      cpu_platform:
+        description: Optional provider-specific CPU platform label for summary comparison.
+        required: false
+        default: ""
+        type: string
+      architecture:
+        description: Processor architecture label for summary comparison.
+        required: true
+        default: x86_64
+        type: choice
+        options:
+          - x86_64
+          - arm64
+      pricing_model:
+        description: Pricing model for future AWS cost calculations.
+        required: true
+        default: spot
+        type: choice
+        options:
+          - spot
+          - on_demand
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-aws-scaffold-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  static-validation:
+    name: AWS scaffold static validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TERRAFORM_DIR: infra/terraform/aws-eks
+      REGION: ${{ inputs.region }}
+      ZONE: ${{ inputs.zone }}
+      SECONDARY_ZONE: ${{ inputs.secondary_zone }}
+      MACHINE_TYPE: ${{ inputs.machine_type }}
+      NODE_COUNT: ${{ inputs.node_count }}
+      PROCESSOR_FAMILY: ${{ inputs.processor_family }}
+      CPU_PLATFORM: ${{ inputs.cpu_platform }}
+      ARCHITECTURE: ${{ inputs.architecture }}
+      PRICING_MODEL: ${{ inputs.pricing_model }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Validate AWS Terraform scaffold
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform plan -refresh=false -input=false \
+            -var="region=$REGION" \
+            -var="zone=$ZONE" \
+            -var="secondary_zone=$SECONDARY_ZONE" \
+            -var="machine_type=$MACHINE_TYPE" \
+            -var="node_count=$NODE_COUNT" \
+            -var="processor_family=$PROCESSOR_FAMILY" \
+            -var="cpu_platform=$CPU_PLATFORM" \
+            -var="architecture=$ARCHITECTURE" \
+            -var="pricing_model=$PRICING_MODEL" \
+            -var="enable_spot_nodes=$([[ "$PRICING_MODEL" == "spot" ]] && echo true || echo false)"
+
+      - name: Summarize scaffold boundary
+        shell: bash
+        run: |
+          {
+            echo "### AWS EKS Scaffold"
+            echo
+            echo "This workflow validates the Terraform scaffold only. It does not authenticate to AWS, apply resources, deploy Helm charts, run benchmarks, or load BigQuery rows."
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| cloud_provider | \`aws\` |"
+            echo "| region | \`$REGION\` |"
+            echo "| zone | \`$ZONE\` |"
+            echo "| machine_type | \`$MACHINE_TYPE\` |"
+            echo "| node_count | \`$NODE_COUNT\` |"
+            echo "| processor_family | \`$PROCESSOR_FAMILY\` |"
+            echo "| cpu_platform | \`${CPU_PLATFORM:-}\` |"
+            echo "| architecture | \`$ARCHITECTURE\` |"
+            echo "| pricing_model | \`$PRICING_MODEL\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

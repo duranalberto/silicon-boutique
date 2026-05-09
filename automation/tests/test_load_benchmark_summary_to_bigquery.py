@@ -57,6 +57,7 @@ def valid_summary(run_id="test-run"):
         "benchmark_start": "2026-05-07T12:00:00Z",
         "cloud_provider": "gcp",
         "cost_per_1m_requests_usd": 3.38983051,
+        "cpu_platform": "intel-sapphire-rapids",
         "duration_seconds": 1200,
         "empty_metrics": [],
         "environment": "gcp",
@@ -81,13 +82,17 @@ def valid_summary(run_id="test-run"):
         "min_ready_pods": 12.0,
         "missing_metrics": [],
         "namespace": "gha-123-1",
+        "node_count": 2,
         "node_hourly_price_usd": 0.03,
+        "pricing_model": "spot",
         "processor_family": "e2",
+        "region": "us-central1",
         "request_count_total": 300,
         "request_failure_count": 5,
         "request_success_count": 295,
         "run_id": run_id,
         "summary_status": "complete",
+        "zone": "us-central1-a",
     }
 
 

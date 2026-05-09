@@ -14,9 +14,12 @@ BASELINE_LABEL_FIELDS = (
     "run_id",
     "environment",
     "cloud_provider",
+    "region",
+    "zone",
     "machine_type",
     "processor_family",
     "architecture",
+    "pricing_model",
 )
 
 QUALITY_LIST_FIELDS = ("missing_metrics", "empty_metrics")
@@ -51,6 +54,7 @@ NON_NULLABLE_COMPARABLE_METRIC_FIELDS = (
     "load_concurrent_users",
     "load_users_per_second",
     "load_profile_source",
+    "node_count",
 )
 
 
@@ -244,6 +248,13 @@ def rejection_reasons(
     ]
     if missing_labels:
         reasons.append("missing_baseline_labels:" + ",".join(missing_labels))
+
+    node_count = numeric_value(row.get("node_count"))
+    if node_count is None or node_count < 1 or int(node_count) != node_count:
+        reasons.append("invalid_node_count")
+
+    if row.get("pricing_model") not in {"local", "spot", "on_demand"}:
+        reasons.append("invalid_pricing_model")
 
     if row.get("summary_status") != "complete":
         reasons.append("summary_status_not_complete")

@@ -3,12 +3,13 @@
 ## Secrets
 
 - Do not commit service account keys, tokens, kubeconfigs, or local cluster credentials.
-- Keep GCP credentials in environment-managed secret stores or CI secret providers, and keep local Kubernetes access data out of tracked files.
+- Keep GCP and AWS credentials in environment-managed secret stores or CI secret providers, and keep local Kubernetes access data out of tracked files.
 - Rotate any exposed credential immediately.
 
 ## Infrastructure
 
 - Treat Terraform state as sensitive.
+- Treat kubeconfigs and cloud provider state for scaffolded providers as sensitive even before a path is production-ready.
 - Restrict access to benchmark results that may include environment details or cost data.
 - Confirm teardown logic before running destructive workflows.
 

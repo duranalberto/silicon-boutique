@@ -103,9 +103,14 @@ class ToolContractTest(unittest.TestCase):
                 "namespace": "run-a",
                 "environment": "gcp",
                 "cloud_provider": "gcp",
+                "region": "us-central1",
+                "zone": "us-central1-a",
                 "machine_type": "c3-standard-4",
                 "processor_family": "c3",
+                "cpu_platform": "intel-sapphire-rapids",
                 "architecture": "x86_64",
+                "node_count": 1,
+                "pricing_model": "spot",
                 "benchmark_start": "2026-05-07T12:00:00Z",
                 "benchmark_end": "2026-05-07T12:20:00Z",
                 "summary_status": "complete",
@@ -122,9 +127,14 @@ class ToolContractTest(unittest.TestCase):
                 "namespace": "run-b",
                 "environment": "gcp",
                 "cloud_provider": "gcp",
+                "region": "us-central1",
+                "zone": "us-central1-a",
                 "machine_type": "t2a-standard-4",
                 "processor_family": "t2a",
+                "cpu_platform": None,
                 "architecture": "arm64",
+                "node_count": 1,
+                "pricing_model": "spot",
                 "benchmark_start": "2026-05-07T13:00:00Z",
                 "benchmark_end": "2026-05-07T13:20:00Z",
                 "summary_status": "partial",
@@ -183,6 +193,11 @@ class ToolContractTest(unittest.TestCase):
 
             self.assertEqual(len(response.results), 1)
             self.assertEqual(response.results[0].run_id, "run-b")
+            self.assertEqual(response.results[0].region, "us-central1")
+            self.assertEqual(response.results[0].zone, "us-central1-a")
+            self.assertEqual(response.results[0].node_count, 1)
+            self.assertEqual(response.results[0].pricing_model, "spot")
+            self.assertIsNone(response.results[0].cpu_platform)
             self.assertEqual(response.results[0].frontend_latency_p99_ms, 180.0)
             self.assertEqual(response.results[0].missing_metrics, ("cpu_usage_cores",))
 

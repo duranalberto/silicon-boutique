@@ -43,7 +43,10 @@ class BenchmarkConfig:
     monitoring_release: str
     machine_type: str
     processor_family: str
+    cpu_platform: str | None
     architecture: str
+    region: str
+    zone: str
     node_count: int
     concurrent_users: str
     users_per_second: str
@@ -206,6 +209,8 @@ class LocalBenchmark:
         self.config.architecture = output_value(
             outputs, "architecture", self.config.architecture
         )
+        self.config.region = output_value(outputs, "region", self.config.region)
+        self.config.node_count = int(output_value(outputs, "node_count", self.config.node_count))
         self.config.kube_context = output_value(outputs, "kube_context", "siliconboutique")
 
         write_json(
@@ -263,6 +268,7 @@ class LocalBenchmark:
         return [
             f"-var=run_id={self.config.run_id}",
             f"-var=machine_type={self.config.machine_type}",
+            f"-var=region={self.config.region}",
             f"-var=node_count={self.config.node_count}",
             f"-var=processor_family={self.config.processor_family}",
             f"-var=architecture={self.config.architecture}",
@@ -589,6 +595,10 @@ class LocalBenchmark:
                 self.config.architecture,
                 "--cloud-provider",
                 self.config.cloud_provider,
+                "--region",
+                self.config.region,
+                "--zone",
+                self.config.zone,
                 "--node-count",
                 str(self.config.node_count),
                 "--pricing-model",
@@ -820,7 +830,12 @@ class LocalBenchmark:
                 "namespace": self.config.namespace,
                 "machine_type": self.config.machine_type,
                 "processor_family": self.config.processor_family,
+                "cpu_platform": self.config.cpu_platform,
                 "architecture": self.config.architecture,
+                "region": self.config.region,
+                "zone": self.config.zone,
+                "node_count": self.config.node_count,
+                "pricing_model": self.config.pricing_model,
                 "benchmark_start": self.config.benchmark_start,
                 "benchmark_end": self.config.benchmark_end,
                 "load_concurrent_users": self.config.concurrent_users,
@@ -829,8 +844,8 @@ class LocalBenchmark:
             },
             "gcp": {
                 "project_id": "",
-                "region": "",
-                "zone": "",
+                "region": self.config.region,
+                "zone": self.config.zone,
             },
             "artifacts": {
                 "artifact_name": self.config.summary_artifact_name,
@@ -858,11 +873,14 @@ class LocalBenchmark:
                 "environment": self.config.environment,
                 "cloud_provider": self.config.cloud_provider,
                 "project_id": "",
-                "region": "",
-                "zone": "",
+                "region": self.config.region,
+                "zone": self.config.zone,
                 "machine_type": self.config.machine_type,
                 "processor_family": self.config.processor_family,
+                "cpu_platform": self.config.cpu_platform or "",
                 "architecture": self.config.architecture,
+                "node_count": str(self.config.node_count),
+                "pricing_model": self.config.pricing_model,
                 "namespace": self.config.namespace,
                 "benchmark_start": self.config.benchmark_start,
                 "benchmark_end": self.config.benchmark_end,
@@ -909,12 +927,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitoring-release", default="sb-monitoring")
     parser.add_argument("--machine-type", default="local")
     parser.add_argument("--processor-family", default="local")
+    parser.add_argument("--cpu-platform", default=None)
     parser.add_argument("--architecture", choices=("x86_64", "arm64"), default="x86_64")
+    parser.add_argument("--region", default="local")
+    parser.add_argument("--zone", default="local")
     parser.add_argument("--node-count", type=int, default=1)
     parser.add_argument("--concurrent-users", default="10")
     parser.add_argument("--users-per-second", default="1")
     parser.add_argument("--test-duration", default="20m")
-    parser.add_argument("--pricing-model", default="none")
+    parser.add_argument("--pricing-model", choices=("local", "spot", "on_demand"), default="local")
     parser.add_argument(
         "--load-profile-file",
         type=Path,
@@ -978,7 +999,10 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         monitoring_release=args.monitoring_release,
         machine_type=args.machine_type,
         processor_family=args.processor_family,
+        cpu_platform=args.cpu_platform,
         architecture=args.architecture,
+        region=args.region,
+        zone=args.zone,
         node_count=args.node_count,
         concurrent_users=concurrent_users,
         users_per_second=users_per_second,

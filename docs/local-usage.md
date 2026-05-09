@@ -114,12 +114,37 @@ Key files:
 - `artifacts/benchmark-summary.json`: canonical summary for one benchmark run.
 - `artifacts/benchmark-summaries.ndjson`: local appendable summary history shaped for BigQuery loading.
 - `artifacts/comparability-report.json`: validation report for the current `run_id`, including schema, metric quality, duration, and coverage.
+- `artifacts/comparison-report.json`: machine-readable historical comparison report across comparable runs.
+- `artifacts/comparison-report.md`: human-readable comparison table for CPU, memory, latency, throughput, cost, and quality.
 - `artifacts/workflow-trace.json`: run metadata and traceability data matching the GitHub workflow shape.
 - `artifacts/prometheus-metrics.json`: extracted Prometheus metrics for the benchmark window.
 - `artifacts/prometheus-metrics-readiness.json`: pre-run metric readiness evidence used to avoid starting a benchmark before required Prometheus series exist.
 - `artifacts/acceptance-demo-report.json`: acceptance evidence from `run_acceptance_demo.py`.
 
-Use `benchmark-summary.json` for the fastest view of a single run. The local benchmark validates only the current `run_id` in `benchmark-summaries.ndjson`; use the full NDJSON history when validating historical comparisons or BigQuery loading.
+Use `benchmark-summary.json` for the fastest view of a single run. The local benchmark validates only the current `run_id` in `benchmark-summaries.ndjson`; use the full NDJSON history when validating historical comparisons, generating comparison reports, or loading BigQuery rows.
+
+For the full local-only Phase 8 validation, prefer the split-evidence helper:
+
+```bash
+python3 automation/scripts/validate_phase8_local.py
+```
+
+The helper does not use GCP, AWS, BigQuery, or GitHub Actions. It runs the local
+unit and Terraform static checks, then writes deterministic comparison evidence
+under `artifacts/phase8-local-validation/`. The valid-only
+`comparability-report.json` should be `pass`; the mixed `comparison-report.json`
+and `.md` should be `warn` when they include comparable ranked groups plus an
+intentional rejected partial row. The default `artifacts/benchmark-summaries.ndjson`
+may still contain legacy or smoke rows and is not guaranteed to pass historical
+comparability by itself.
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
+```
 
 ## Inspect Grafana
 
@@ -179,6 +204,16 @@ PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp status \
 PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp history \
   --summary-store artifacts/benchmark-summaries.ndjson \
   --limit 10
+```
+
+- Generate local comparison reports from accumulated summaries:
+
+```bash
+python3 automation/scripts/generate_comparison_report.py \
+  --summary-store artifacts/benchmark-summaries.ndjson \
+  --schema automation/templates/benchmark-summary.schema.json \
+  --report-output artifacts/comparison-report.json \
+  --markdown-output artifacts/comparison-report.md
 ```
 
 - Optionally prepare BigQuery-backed persistence for cloud or integration testing by following the guarded BigQuery steps in [`docs/runbook.md`](runbook.md#github-actions-benchmark-workflow).

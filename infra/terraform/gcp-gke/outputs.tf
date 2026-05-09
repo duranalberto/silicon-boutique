@@ -23,6 +23,16 @@ output "architecture" {
   value       = var.architecture
 }
 
+output "node_count" {
+  description = "Benchmark node count metadata for workflow parity."
+  value       = var.node_count
+}
+
+output "enable_spot_nodes" {
+  description = "Whether the benchmark GKE node pool uses Spot VMs."
+  value       = var.enable_spot_nodes
+}
+
 output "project_id" {
   description = "GCP project ID for the benchmark resources."
   value       = var.project_id

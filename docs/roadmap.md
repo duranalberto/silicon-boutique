@@ -218,6 +218,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 ## Phase 8: Cross-Environment Comparison
 
 ### P8.1 - Normalize provider and processor metadata
+- Status: Implemented; canonical summaries, BigQuery rows, comparability validation, workflow traces, and MCP history references now carry normalized provider location, node, pricing, load profile, and optional CPU platform metadata.
 - Description: Extend benchmark metadata so every run records cloud provider, region, zone, machine type, CPU platform or processor family, architecture, node count, spot/on-demand mode, and load profile.
 - Why it matters: The original use case compares processors across previous generations and different cloud environments; metadata must be stable before comparisons are trustworthy.
 - How to test: Validate summary rows from local and GCP fixtures against the schema and confirm comparison mode rejects rows with incompatible or missing metadata.
@@ -225,6 +226,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 - Dependencies: `P7.2`, `P7.4`.
 
 ### P8.2 - Add comparison reports over historical summaries
+- Status: Implemented; the comparison generator reads local NDJSON or BigQuery summary history and writes JSON plus Markdown ranking reports while flagging rejected non-comparable runs.
 - Description: Add a report generator that reads BigQuery or local NDJSON summaries and produces comparison tables for CPU, memory, latency, throughput, cost, and run quality across machine types.
 - Why it matters: The benchmark is useful only when repeated runs can be compared without manual spreadsheet work.
 - How to test: Use fixture rows for at least two machine types and confirm the report ranks results consistently and flags non-comparable runs.
@@ -232,6 +234,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 - Dependencies: `P8.1`, `P7.4`.
 
 ### P8.3 - Add the next cloud-provider scaffold
+- Status: Implemented; AWS EKS now has a static-validation Terraform scaffold, pricing fixtures, workflow validation stub, and documentation while live AWS execution remains explicitly unpromoted.
 - Description: Add a second cloud-provider path as a bounded scaffold, reusing the same Helm workload, monitoring chart, extraction scripts, and summary schema.
 - Why it matters: GCP is implemented as the first rollout target, but the stated goal includes different cloud environments.
 - How to test: Validate the new provider Terraform or Kubernetes access path in static mode, then run the workload deployment against a test cluster when credentials are available.

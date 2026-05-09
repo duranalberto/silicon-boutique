@@ -22,5 +22,5 @@ silicon-boutique/
 
 - The `docs/` folder is the source of truth for planning and architecture notes.
 - The terminology in `README.md`, `docs/spec-driven-development.md`, `docs/architecture.md`, `docs/runbook.md`, and `docs/roadmap.md` should describe the same benchmark pipeline stages.
-- The `automation/`, `infra/`, and `k8s/` folders contain the implemented local and GCP benchmark pipeline assets.
+- The `automation/`, `infra/`, and `k8s/` folders contain the implemented local and GCP benchmark pipeline assets plus the AWS EKS scaffold.
 - The `mcp-server/` folder contains dependency-light MCP boundary contracts and fixture-backed local adapters; production adapters are tracked in the roadmap.

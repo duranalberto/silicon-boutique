@@ -45,7 +45,7 @@ The current manifest keeps `trigger_benchmark_run` planned for P8.1 and marks th
 - `failed`
 - `unknown`
 
-`query_historical_metrics` accepts optional `machine_type`, `processor_family`, and `architecture` filters plus a `limit` from `1` to `100`. The default limit is `10`.
+`query_historical_metrics` accepts optional `machine_type`, `processor_family`, and `architecture` filters plus a `limit` from `1` to `100`. Results include normalized provider and processor metadata: `cloud_provider`, `region`, `zone`, `machine_type`, `processor_family`, optional `cpu_platform`, `architecture`, `node_count`, `pricing_model`, and load profile fields. The default limit is `10`.
 
 ## Fixture-Backed Local Commands
 

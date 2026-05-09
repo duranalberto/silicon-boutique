@@ -38,6 +38,16 @@ output "architecture" {
   value       = var.architecture
 }
 
+output "region" {
+  description = "Local region metadata for workflow parity."
+  value       = var.region
+}
+
+output "node_count" {
+  description = "Local node count metadata for workflow parity."
+  value       = var.node_count
+}
+
 output "labels" {
   description = "Required labels applied to local resources managed by this Terraform root."
   value       = local.common_labels
