@@ -20,7 +20,7 @@ variable "run_id" {
 }
 
 variable "environment" {
-  description = "Benchmark environment. The AWS EKS scaffold only supports aws."
+  description = "Benchmark environment. The AWS EKS path only supports aws."
   type        = string
   default     = "aws"
 
@@ -61,7 +61,7 @@ variable "zone" {
 }
 
 variable "secondary_zone" {
-  description = "Secondary AWS availability zone used by the scaffolded EKS subnet set."
+  description = "Secondary AWS availability zone used by the EKS subnet set."
   type        = string
   default     = "us-east-1b"
 
@@ -91,7 +91,7 @@ variable "cluster_name" {
 }
 
 variable "machine_type" {
-  description = "EC2 instance type for the scaffolded benchmark EKS node group."
+  description = "EC2 instance type for the benchmark EKS node group."
   type        = string
   default     = "m7i.xlarge"
 
@@ -163,7 +163,7 @@ variable "pricing_model" {
 
   validation {
     condition     = contains(["spot", "on_demand"], var.pricing_model)
-    error_message = "pricing_model must be spot or on_demand for the AWS EKS scaffold."
+    error_message = "pricing_model must be spot or on_demand for the AWS EKS path."
   }
 }
 
@@ -174,7 +174,7 @@ variable "enable_spot_nodes" {
 }
 
 variable "cluster_version" {
-  description = "EKS control plane Kubernetes version for the scaffolded cluster."
+  description = "EKS control plane Kubernetes version for the benchmark cluster."
   type        = string
   default     = "1.31"
 
@@ -185,7 +185,7 @@ variable "cluster_version" {
 }
 
 variable "disk_size_gb" {
-  description = "EBS root volume size in GB for each scaffolded worker node."
+  description = "EBS root volume size in GB for each worker node."
   type        = number
   default     = 50
 

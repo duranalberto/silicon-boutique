@@ -17,7 +17,7 @@ The local path uses the same workflow shape as the cloud benchmark:
 5. Generate and validate benchmark summaries.
 6. Tear down the Terraform-owned namespace.
 
-The local workflow is meant for development, smoke testing, dashboard inspection, and validating changes before using the GCP rollout path.
+The local workflow is meant for development, smoke testing, dashboard inspection, and validating changes before using the guarded GCP or AWS benchmark workflows described in [`docs/runbook.md`](runbook.md#github-actions-benchmark-workflow).
 
 ## Prerequisites
 
@@ -103,7 +103,7 @@ python3 automation/scripts/run_acceptance_demo.py \
   --min-duration-seconds 60
 ```
 
-The acceptance demo verifies the benchmark summary and dashboard evidence for one `run_id`, writes `artifacts/acceptance-demo-report.json`, and then cleans up.
+The acceptance demo verifies the benchmark summary and live Grafana dashboard API evidence for one `run_id`, writes `artifacts/acceptance-demo-report.json`, and then cleans up.
 
 ## Inspect Results
 
@@ -217,6 +217,7 @@ python3 automation/scripts/generate_comparison_report.py \
 ```
 
 - Optionally prepare BigQuery-backed persistence for cloud or integration testing by following the guarded BigQuery steps in [`docs/runbook.md`](runbook.md#github-actions-benchmark-workflow).
+- Move to guarded GCP or AWS benchmark workflows only after local acceptance passes and cloud credentials, quota, Terraform state, and teardown windows are confirmed in the runbook.
 
 ## Cleanup And Safety
 

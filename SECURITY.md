@@ -9,7 +9,7 @@
 ## Infrastructure
 
 - Treat Terraform state as sensitive.
-- Treat kubeconfigs and cloud provider state for scaffolded providers as sensitive even before a path is production-ready.
+- Treat kubeconfigs, Terraform state, cloud provider state, BigQuery access, and benchmark artifacts as sensitive for every local, GCP, and AWS path.
 - Restrict access to benchmark results that may include environment details or cost data.
 - Confirm teardown logic before running destructive workflows.
 

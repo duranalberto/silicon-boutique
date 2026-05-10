@@ -44,6 +44,9 @@ class GenerateComparisonReportTest(unittest.TestCase):
         failures=1,
         request_total=1000,
         benchmark_start="2026-05-07T12:00:00Z",
+        cloud_provider="gcp",
+        region="us-central1",
+        zone="us-central1-a",
     ):
         return {
             "architecture": architecture,
@@ -56,12 +59,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
             "benchmark_compute_cost_usd": 0.001,
             "benchmark_end": "2026-05-07T12:20:00Z",
             "benchmark_start": benchmark_start,
-            "cloud_provider": "gcp",
+            "cloud_provider": cloud_provider,
             "cost_per_1m_requests_usd": cost,
             "cpu_platform": "intel-sapphire-rapids",
             "duration_seconds": 1200,
             "empty_metrics": [],
-            "environment": "gcp",
+            "environment": cloud_provider,
             "frontend_latency_max_ms": p99 + 10,
             "frontend_latency_p50_ms": p99 / 2,
             "frontend_latency_p95_ms": p99 - 10,
@@ -87,13 +90,13 @@ class GenerateComparisonReportTest(unittest.TestCase):
             "node_hourly_price_usd": 0.03,
             "pricing_model": "spot",
             "processor_family": processor_family,
-            "region": "us-central1",
+            "region": region,
             "request_count_total": request_total,
             "request_failure_count": failures,
             "request_success_count": request_total - failures,
             "run_id": run_id,
             "summary_status": "complete",
-            "zone": "us-central1-a",
+            "zone": zone,
         }
 
     def write_store(self, path, rows):
@@ -166,7 +169,36 @@ class GenerateComparisonReportTest(unittest.TestCase):
             payload["rankings"]["requests_per_cpu_core"][0]["machine_type"],
             "t2a-standard-4",
         )
-        self.assertIn("| Machine | Processor |", markdown)
+        self.assertIn("| Provider | Region | Machine | Processor |", markdown)
+        self.assertIn("| 1 | gcp | us-central1 | c3-standard-4 | c3 |", markdown)
+
+    def test_mixed_cloud_rows_render_provider_and_region(self):
+        rows = [
+            self.valid_summary("gcp-a"),
+            self.valid_summary(
+                "aws-a",
+                machine_type="m7i.xlarge",
+                processor_family="m7i",
+                cloud_provider="aws",
+                region="us-east-1",
+                zone="us-east-1a",
+                avg_rps=90,
+                p99=130,
+            ),
+        ]
+
+        exit_code, payload, markdown = self.run_report(rows)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["comparison_group_count"], 2)
+        providers = {
+            group["metadata"]["machine_type"]: group["metadata"]["cloud_provider"]
+            for group in payload["comparison_groups"]
+        }
+        self.assertEqual(providers["c3-standard-4"], "gcp")
+        self.assertEqual(providers["m7i.xlarge"], "aws")
+        self.assertIn("| aws | us-east-1 | m7i.xlarge | m7i |", markdown)
 
     def test_rejects_non_comparable_runs(self):
         partial = self.valid_summary("partial")

@@ -1,6 +1,6 @@
 # MCP Server
 
-This directory contains the Python MCP boundary package. P9.4 exposes production GitHub Actions adapters for `trigger_benchmark_run` and `get_benchmark_status`, a production BigQuery adapter for `query_historical_metrics`, and a real stdio MCP SDK server around those tools.
+This directory contains the Python MCP boundary package. It exposes production GitHub Actions adapters for `trigger_benchmark_run` and `get_benchmark_status`, a production BigQuery adapter for `query_historical_metrics`, and a stdio MCP SDK server around those tools.
 
 ## Package Layout
 
@@ -40,7 +40,7 @@ The package exposes abstract ports for:
 
 The current manifest marks `trigger_benchmark_run`, `get_benchmark_status`, and `query_historical_metrics` as production-adapter ready. Local fixture-backed status and history checks remain available for development.
 
-`trigger_benchmark_run` accepts the GCP benchmark metadata represented by `BenchmarkRunRequest`, validates the request, dispatches the `benchmark.yml` workflow with `workflow_dispatch`, and returns the derived benchmark identity as `gha-<github-run-id>-1`.
+`trigger_benchmark_run` accepts the GCP benchmark metadata represented by `BenchmarkRunRequest`, validates the request, dispatches the `benchmark.yml` workflow with `workflow_dispatch`, and returns the derived benchmark identity as `gha-<github-run-id>-1`. The AWS benchmark workflow is not exposed through this trigger adapter unless a later interface adds it explicitly.
 
 Configure the production adapter with environment variables:
 
@@ -80,7 +80,7 @@ PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp status \
   --run-id gha-123-1
 ```
 
-Historical queries read the P3.2 benchmark summary NDJSON store.
+Historical queries can read the local benchmark summary NDJSON store.
 
 ```bash
 PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp history \
@@ -129,4 +129,4 @@ Fixture mode supports `get_benchmark_status` and `query_historical_metrics`. It 
 
 ## Out of Scope
 
-P9.4 does not implement Streamable HTTP, remote hosting, MCP auth, prompts, resources, artifact-derived trace enrichment, Terraform access, Helm access, or direct imports from the existing pipeline internals. GitHub Actions and stored benchmark summaries remain behind adapter interfaces so the MCP layer stays a clean boundary over run control and historical data.
+The MCP package does not implement Streamable HTTP, remote hosting, MCP auth, prompts, resources, artifact-derived trace enrichment, Terraform access, Helm access, or direct imports from the existing pipeline internals. GitHub Actions and stored benchmark summaries remain behind adapter interfaces so the MCP layer stays a clean boundary over run control and historical data.

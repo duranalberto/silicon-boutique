@@ -1,6 +1,6 @@
 # AWS EKS Terraform
 
-This Terraform root is the bounded AWS scaffold for SiliconBoutique. It renders an EKS-shaped benchmark environment with a run-scoped VPC, subnets, EKS cluster, managed node group, tags, node labels, and workflow metadata outputs.
+This Terraform root provisions the bounded AWS EKS benchmark environment for SiliconBoutique. It renders a run-scoped VPC, subnets, EKS cluster, managed node group, tags, node labels, and workflow metadata outputs.
 
 Routine validation is intentionally static and does not require AWS credentials:
 
@@ -23,9 +23,9 @@ timeout 30m terraform destroy -auto-approve -var='static_validation_mode=false'
 
 The `get_credentials_command` output is provided for later workflow steps so Terraform does not write kubeconfig material into state.
 
-## Scaffold Boundaries
+## Workflow Boundary
 
-P8.3 does not implement production AWS OIDC, IAM policy hardening, or a live AWS benchmark workflow. The existing Helm workload, monitoring chart, metric extraction, summary generation, BigQuery load, and comparison reporting scripts should be reused once a guarded AWS workflow is promoted beyond scaffold status.
+Live AWS execution is orchestrated by `.github/workflows/benchmark-aws.yml` with GitHub OIDC through `AWS_ROLE_TO_ASSUME`. That workflow applies this root with `static_validation_mode=false`, configures kubeconfig from `get_credentials_command`, deploys the shared Helm workload and monitoring charts, writes canonical benchmark artifacts, loads summaries to BigQuery, and destroys the run-scoped resources.
 
 ## Naming, Tags, and Teardown
 

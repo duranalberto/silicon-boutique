@@ -390,16 +390,18 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Comparison Groups",
         "",
-        "| Rank | Machine | Processor | Arch | Pricing | Runs | Avg RPS | P99 Latency ms | Cost / 1M | Req / CPU Core | Failure Ratio | Coverage |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Rank | Provider | Region | Machine | Processor | Arch | Pricing | Runs | Avg RPS | P99 Latency ms | Cost / 1M | Req / CPU Core | Failure Ratio | Coverage |",
+        "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     latency_ranks = ranking_lookup(report["rankings"].get("frontend_latency_p99_ms", []))
     for group in report["comparison_groups"]:
         metadata = group["metadata"]
         metrics = group["metrics"]
         lines.append(
-            "| {rank} | {machine} | {processor} | {arch} | {pricing} | {runs} | {rps} | {p99} | {cost} | {efficiency} | {failure} | {coverage} |".format(
+            "| {rank} | {provider} | {region} | {machine} | {processor} | {arch} | {pricing} | {runs} | {rps} | {p99} | {cost} | {efficiency} | {failure} | {coverage} |".format(
                 rank=latency_ranks.get(group["group_id"], ""),
+                provider=metadata.get("cloud_provider") or "",
+                region=metadata.get("region") or "",
                 machine=metadata.get("machine_type") or "",
                 processor=metadata.get("processor_family") or "",
                 arch=metadata.get("architecture") or "",

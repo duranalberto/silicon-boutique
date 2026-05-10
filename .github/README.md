@@ -1,6 +1,6 @@
 # GitHub Metadata
 
-This directory is reserved for GitHub-specific repository configuration.
+This directory contains GitHub-specific repository configuration.
 
 Current subdirectory:
 

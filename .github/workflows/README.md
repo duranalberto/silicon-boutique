@@ -2,13 +2,23 @@
 
 This directory holds the GitHub Actions pipelines for benchmark orchestration.
 
-## AWS scaffold workflow
+## AWS benchmark workflow
 
-`benchmark-aws.yml` validates the P8.3 AWS EKS scaffold through `workflow_dispatch`. It runs `terraform fmt`, `terraform init -backend=false`, `terraform validate`, and `terraform plan -refresh=false` for `infra/terraform/aws-eks` using static provider validation. It intentionally does not configure AWS credentials, apply resources, deploy Helm charts, run benchmarks, or persist BigQuery rows.
+`benchmark-aws.yml` runs the guarded AWS EKS benchmark path through `workflow_dispatch`. It authenticates to AWS with GitHub OIDC, provisions the ephemeral EKS benchmark environment with Terraform, configures kubeconfig with `aws eks update-kubeconfig`, deploys the same Online Boutique and monitoring Helm charts used by local/GCP, runs the benchmark window, extracts metrics, writes the canonical `BenchmarkSummary`, persists the row to BigQuery, verifies optional acceptance evidence, uploads artifacts, and always attempts Helm plus Terraform teardown.
+
+The workflow expects these repository or environment secrets:
+
+- `AWS_ROLE_TO_ASSUME`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+
+The AWS role must be trusted by GitHub OIDC and able to create, inspect, and delete the run-scoped EKS, VPC, subnet, IAM, and node group resources managed by `infra/terraform/aws-eks`. The GCP service account is used only for the durable BigQuery summary load and needs the same BigQuery permissions described for the GCP benchmark workflow.
+
+Manual dispatch inputs include AWS region, primary and secondary zones, EC2 instance type, node count, processor metadata, load-generator settings, pricing model, benchmark duration, BigQuery destination, `failure_stage`, and `acceptance_demo`. Use `failure_stage=none` for normal benchmark runs. Use controlled failures only to prove teardown behavior in a sandbox account.
 
 ## Benchmark workflow
 
-`benchmark.yml` runs the GCP benchmark path through `workflow_dispatch`. It sequences the Phase 4 automation flow:
+`benchmark.yml` runs the guarded GCP benchmark path through `workflow_dispatch`. It sequences the same benchmark flow used by the AWS workflow:
 
 1. Authenticate to GCP with GitHub OIDC.
 2. Provision the ephemeral GKE benchmark environment with Terraform.
@@ -27,7 +37,7 @@ The workflow expects these repository or environment secrets:
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT`
 
-The service account must be able to create and tear down the ephemeral GKE resources and must have BigQuery permissions to inspect the summary table, query duplicate `run_id` values, and load rows. A project-level role set such as `roles/bigquery.jobUser` plus table-level data editor access on the summary table is sufficient for the P7.2 load step.
+The service account must be able to create and tear down the ephemeral GKE resources and must have BigQuery permissions to inspect the summary table, query duplicate `run_id` values, and load rows. A project-level role set such as `roles/bigquery.jobUser` plus table-level data editor access on the summary table is sufficient for the summary load step.
 
 Manual dispatch inputs include the GCP project, region, zone, machine type, node count, processor metadata, optional CPU platform, load-generator settings, `load_profile_source`, pricing model, BigQuery destination, and `failure_stage`. Use `load_profile_source=calibration` when applying a profile selected by `automation/scripts/calibrate_load_profile.py`. The workflow derives a DNS-safe `run_id` from the GitHub Actions run ID and attempt so Terraform resources, Kubernetes labels, artifacts, and BigQuery rows remain traceable.
 
@@ -74,3 +84,6 @@ Artifacts are uploaded as `benchmark-gha-<github-run-id>-<attempt>` and include:
 - `teardown-status.env`
 - `workflow-trace.json`
 - `workflow-trace.env`
+- `acceptance-demo-report.json` when `acceptance_demo=true`
+
+The AWS workflow uploads the same artifact set as `benchmark-aws-<github-run-id>-<attempt>` so acceptance matrix and comparison tooling can consume GCP and AWS runs interchangeably.

@@ -14,7 +14,7 @@ terraform output namespace
 terraform destroy -auto-approve
 ```
 
-Use variables to align local validation metadata with the future GCP workflow shape:
+Use variables to align local validation metadata with the cloud workflow shape:
 
 ```bash
 terraform plan \

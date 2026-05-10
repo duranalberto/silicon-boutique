@@ -1,4 +1,5 @@
 import importlib.util
+import base64
 import json
 import sys
 import tempfile
@@ -25,12 +26,21 @@ class FakeRunner:
         mismatched_summary=False,
         grafana_api_payload=None,
         grafana_api_returncode=0,
+        omit_grafana_secret=False,
+        grafana_secret_payload=None,
     ):
         self.commands = []
         self.omit_summary = omit_summary
         self.mismatched_summary = mismatched_summary
-        self.grafana_api_payload = grafana_api_payload
+        self.grafana_api_payload = grafana_api_payload or {
+            "dashboard": {
+                "uid": "silicon-boutique-online-boutique",
+                "title": "SiliconBoutique Online Boutique Benchmark",
+            }
+        }
         self.grafana_api_returncode = grafana_api_returncode
+        self.omit_grafana_secret = omit_grafana_secret
+        self.grafana_secret_payload = grafana_secret_payload
 
     def run(
         self,
@@ -59,16 +69,21 @@ class FakeRunner:
             return run_acceptance_demo.run_local_benchmark.CommandResult(
                 0, json.dumps(dashboard_configmap()), ""
             )
+        if rendered[:3] == ["kubectl", "get", "secret"]:
+            payload = self.grafana_secret_payload
+            if payload is None:
+                payload = {} if self.omit_grafana_secret else grafana_secret()
+            return run_acceptance_demo.run_local_benchmark.CommandResult(
+                0, json.dumps(payload), ""
+            )
         if rendered[:2] == ["curl", "-fsS"] and any("/api/dashboards/uid/" in part for part in rendered):
             if self.grafana_api_returncode != 0:
                 return run_acceptance_demo.run_local_benchmark.CommandResult(
                     self.grafana_api_returncode, "", "grafana unavailable"
                 )
-            if self.grafana_api_payload is not None:
-                return run_acceptance_demo.run_local_benchmark.CommandResult(
-                    0, json.dumps(self.grafana_api_payload), ""
-                )
-            return run_acceptance_demo.run_local_benchmark.CommandResult(0, "not json", "")
+            return run_acceptance_demo.run_local_benchmark.CommandResult(
+                0, json.dumps(self.grafana_api_payload), ""
+            )
         if rendered[:2] == ["curl", "-fsS"]:
             return run_acceptance_demo.run_local_benchmark.CommandResult(0, "ready", "")
         if any(part.endswith("extract_prometheus_metrics.py") for part in rendered):
@@ -150,7 +165,7 @@ class AcceptanceDemoTest(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["run_id"], "local-test")
             self.assertEqual(report["checks"]["dashboard"]["dashboard_uid"], "silicon-boutique-online-boutique")
-            self.assertEqual(report["checks"]["dashboard"]["grafana_load_status"]["status"], "skipped_unavailable")
+            self.assertEqual(report["checks"]["dashboard"]["grafana_load_status"]["status"], "passed")
             self.assertEqual(report["checks"]["bigquery"]["status"], "skipped_optional")
 
     def test_grafana_api_success_is_recorded(self):
@@ -171,19 +186,43 @@ class AcceptanceDemoTest(unittest.TestCase):
             report = read_json(Path(tmpdir) / "acceptance-demo-report.json")
             self.assertEqual(report["checks"]["dashboard"]["grafana_load_status"]["status"], "passed")
 
-    def test_grafana_api_unavailable_is_optional_evidence(self):
+    def test_grafana_api_unavailable_fails_acceptance(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result, _ = run_demo(
                 tmpdir,
                 runner=FakeRunner(grafana_api_returncode=7),
             )
 
-            self.assertEqual(result, 0)
+            self.assertEqual(result, 2)
             report = read_json(Path(tmpdir) / "acceptance-demo-report.json")
             self.assertEqual(
                 report["checks"]["dashboard"]["grafana_load_status"]["status"],
-                "skipped_unavailable",
+                "failed",
             )
+            self.assertEqual(report["status"], "failed")
+
+    def test_missing_grafana_secret_fails_acceptance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, _ = run_demo(tmpdir, runner=FakeRunner(omit_grafana_secret=True))
+
+            self.assertEqual(result, 2)
+            report = read_json(Path(tmpdir) / "acceptance-demo-report.json")
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("admin-password", report["checks"]["orchestration"]["error"])
+
+    def test_invalid_grafana_secret_fails_acceptance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, _ = run_demo(
+                tmpdir,
+                runner=FakeRunner(
+                    grafana_secret_payload={"data": {"admin-password": "not-base64!"}}
+                ),
+            )
+
+            self.assertEqual(result, 2)
+            report = read_json(Path(tmpdir) / "acceptance-demo-report.json")
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("base64", report["checks"]["orchestration"]["error"])
 
     def test_local_demo_loads_bigquery_when_settings_are_provided(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -313,6 +352,11 @@ def dashboard_configmap():
             }
         ]
     }
+
+
+def grafana_secret():
+    encoded = base64.b64encode(b"prom-operator").decode("ascii")
+    return {"data": {"admin-password": encoded}}
 
 
 def metrics_payload():

@@ -90,14 +90,26 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn(("aws", "us-east-1", "c7g.xlarge", "spot"), keys)
         self.assertIn(("aws", "us-east-1", "c7g.xlarge", "on_demand"), keys)
 
-    def test_aws_workflow_is_static_validation_only(self):
+    def test_aws_workflow_promotes_live_benchmark_path(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn("Benchmark AWS Scaffold", workflow)
+        self.assertIn("Benchmark AWS", workflow)
         self.assertIn("infra/terraform/aws-eks", workflow)
-        self.assertIn("terraform plan -refresh=false -input=false", workflow)
-        self.assertIn("does not authenticate to AWS", workflow)
-        self.assertNotIn("aws-actions/configure-aws-credentials", workflow)
+        self.assertIn("aws-actions/configure-aws-credentials", workflow)
+        self.assertIn("role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn("-var=\"static_validation_mode=false\"", workflow)
+        self.assertIn("terraform apply -auto-approve", workflow)
+        self.assertIn("aws eks update-kubeconfig", self.read("outputs.tf"))
+        self.assertIn("helm upgrade --install \"$WORKLOAD_RELEASE\"", workflow)
+        self.assertIn("helm upgrade --install \"$MONITORING_RELEASE\"", workflow)
+        self.assertIn("--cloud-provider aws", workflow)
+        self.assertIn("load_benchmark_summary_to_bigquery.py", workflow)
+        self.assertIn("run_acceptance_demo.py", workflow)
+        self.assertIn("terraform destroy -auto-approve", workflow)
+        self.assertIn("actions/upload-artifact", workflow)
+        self.assertIn("teardown-status.env", workflow)
+        self.assertNotIn("does not authenticate to AWS", workflow)
 
 
 if __name__ == "__main__":

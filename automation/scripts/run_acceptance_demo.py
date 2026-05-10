@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import subprocess
 import sys
@@ -248,8 +249,21 @@ class AcceptanceDemo:
             namespace=namespace,
             kube_context=kube_context,
         )
-        if grafana_load_status["status"] == "failed":
-            raise AcceptanceDemoError("Grafana dashboard API returned unexpected dashboard metadata")
+        if grafana_load_status["status"] != "passed":
+            reason = grafana_load_status.get("reason") or "Grafana dashboard API did not prove the expected dashboard"
+            self.dashboard_evidence = {
+                "status": "failed",
+                "dashboard_service": "sb-monitoring-grafana",
+                "dashboard_uid": selected["uid"],
+                "dashboard_title": selected["title"],
+                "dashboard_configmap": selected["configmap"],
+                "dashboard_key": selected["key"],
+                "run_id_present": selected["run_id_present"],
+                "missing_panel_expressions": selected["missing_panel_expressions"],
+                "prometheus_metrics": metrics_evidence,
+                "grafana_load_status": grafana_load_status,
+            }
+            raise AcceptanceDemoError(reason)
         return {
             "status": "passed",
             "dashboard_service": "sb-monitoring-grafana",
@@ -267,13 +281,14 @@ class AcceptanceDemo:
         self, *, namespace: str, kube_context: str
     ) -> dict[str, Any]:
         try:
+            password = self.grafana_admin_password(namespace=namespace, kube_context=kube_context)
             with self.port_forward_grafana(namespace=namespace, kube_context=kube_context):
                 result = self.runner.run(
                     [
                         "curl",
                         "-fsS",
                         "-u",
-                        "admin:prom-operator",
+                        f"admin:{password}",
                         f"http://127.0.0.1:{self.config.grafana_port}/api/dashboards/uid/{EXPECTED_DASHBOARD_UID}",
                     ],
                     check=False,
@@ -281,13 +296,13 @@ class AcceptanceDemo:
                 )
         except Exception as exc:
             return {
-                "status": "skipped_unavailable",
+                "status": "failed",
                 "reason": str(exc),
                 "dashboard_uid": EXPECTED_DASHBOARD_UID,
             }
         if result.returncode != 0:
             return {
-                "status": "skipped_unavailable",
+                "status": "failed",
                 "reason": result.stderr.strip() or "Grafana API request failed",
                 "dashboard_uid": EXPECTED_DASHBOARD_UID,
             }
@@ -295,7 +310,7 @@ class AcceptanceDemo:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
             return {
-                "status": "skipped_unavailable",
+                "status": "failed",
                 "reason": "Grafana API did not return JSON dashboard metadata",
                 "dashboard_uid": EXPECTED_DASHBOARD_UID,
             }
@@ -309,6 +324,35 @@ class AcceptanceDemo:
             "dashboard_title": title,
             "url": f"http://127.0.0.1:{self.config.grafana_port}/api/dashboards/uid/{EXPECTED_DASHBOARD_UID}",
         }
+
+    def grafana_admin_password(self, *, namespace: str, kube_context: str) -> str:
+        command = [
+            "kubectl",
+            "get",
+            "secret",
+            "sb-monitoring-grafana",
+            "--namespace",
+            namespace,
+            "-o",
+            "json",
+        ]
+        if kube_context:
+            command.extend(["--context", kube_context])
+        result = self.runner.run(command, capture=True)
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise AcceptanceDemoError("Grafana admin secret query returned invalid JSON") from exc
+        encoded_password = payload.get("data", {}).get("admin-password")
+        if not isinstance(encoded_password, str) or not encoded_password:
+            raise AcceptanceDemoError("Grafana admin secret is missing admin-password")
+        try:
+            password = base64.b64decode(encoded_password, validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise AcceptanceDemoError("Grafana admin password is not valid base64 UTF-8") from exc
+        if not password:
+            raise AcceptanceDemoError("Grafana admin password is empty")
+        return password
 
     def prometheus_metrics_evidence(self, run_id: str) -> dict[str, Any]:
         metrics_path = self.config.artifacts_dir / "prometheus-metrics.json"

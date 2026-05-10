@@ -22,13 +22,17 @@ Use `--skip-destroy` only for debugging a local run; the default path cleans up 
 
 ## Acceptance Demo
 
-`scripts/run_acceptance_demo.py` is the single-command P7.6 proof path. It runs the local benchmark flow, verifies the canonical summary and dashboard evidence for one `run_id`, optionally loads BigQuery when destination inputs are provided, writes `acceptance-demo-report.json`, and then cleans up.
+`scripts/run_acceptance_demo.py` is the single-command local proof path. It runs the local benchmark flow, verifies the canonical summary and dashboard API evidence for one `run_id`, optionally loads BigQuery when destination inputs are provided, writes `acceptance-demo-report.json`, and then cleans up.
 
 ```bash
 python3 automation/scripts/run_acceptance_demo.py --mode local
 ```
 
 Use `--dashboard-hold-seconds` for a bounded local Grafana inspection window before automatic cleanup resumes.
+
+## Acceptance Matrix
+
+`scripts/run_acceptance_matrix.py` ties local, GCP, AWS, dashboard, summary, comparison, storage, and teardown evidence together in one report. Local mode runs the local acceptance demo and records cloud checks as skipped when credentials are not supplied; verify mode consumes downloaded cloud artifact directories without launching infrastructure.
 
 ## Prometheus Extraction
 
@@ -217,3 +221,7 @@ python3 automation/scripts/validate_benchmark_comparability.py \
 ```
 
 The report lists comparable run IDs, rejected runs with reasons, schema field count, `summary_validation_status`, and `comparability_validation_status`. `comparability_status` remains as an alias for the cross-run status.
+
+## Internal Workflow Helpers
+
+`scripts/write_workflow_trace.py` and `scripts/render_acceptance_summary.py` keep GitHub workflow trace and step-summary rendering in testable Python instead of inline workflow snippets. They are normally called by workflows or acceptance automation rather than run directly by operators.

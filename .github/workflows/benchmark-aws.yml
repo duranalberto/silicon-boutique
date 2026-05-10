@@ -1,10 +1,10 @@
-name: Benchmark AWS Scaffold
+name: Benchmark AWS
 
 on:
   workflow_dispatch:
     inputs:
       region:
-        description: AWS region for the scaffolded EKS benchmark resources.
+        description: AWS region for the EKS benchmark resources.
         required: true
         default: us-east-1
         type: string
@@ -46,31 +46,94 @@ on:
         options:
           - x86_64
           - arm64
+      concurrent_users:
+        description: Load generator concurrent user count.
+        required: true
+        default: "10"
+        type: string
+      users_per_second:
+        description: Load generator users spawned per second.
+        required: true
+        default: "1"
+        type: string
+      load_profile_source:
+        description: Source of load-generator settings for summary metadata.
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - calibration
       pricing_model:
-        description: Pricing model for future AWS cost calculations.
+        description: Pricing model for cost calculations.
         required: true
         default: spot
         type: choice
         options:
           - spot
           - on_demand
+      test_duration:
+        description: Benchmark duration as seconds, Nm, or Nh.
+        required: true
+        default: 20m
+        type: string
+      bigquery_project_id:
+        description: GCP project ID containing the durable BigQuery summary table.
+        required: true
+        type: string
+      bigquery_dataset:
+        description: BigQuery dataset for durable benchmark summaries.
+        required: true
+        default: silicon_boutique
+        type: string
+      bigquery_table:
+        description: BigQuery table for durable benchmark summaries.
+        required: true
+        default: benchmark_summaries
+        type: string
+      bigquery_location:
+        description: BigQuery dataset location for durable benchmark summaries.
+        required: true
+        default: US
+        type: string
+      failure_stage:
+        description: Optional controlled failure point for teardown validation.
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - after_provision
+          - after_monitoring_ready
+          - before_extract
+      acceptance_demo:
+        description: Verify the end-to-end acceptance demo evidence before teardown.
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
-  group: benchmark-aws-scaffold-${{ github.ref }}
+  group: benchmark-aws-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  static-validation:
-    name: AWS scaffold static validation
+  benchmark:
+    name: AWS benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 120
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
       TERRAFORM_DIR: infra/terraform/aws-eks
+      WORKLOAD_RELEASE: silicon-boutique-online-boutique
+      MONITORING_RELEASE: sb-monitoring
+      WORKLOAD_CHART: k8s/charts/silicon-boutique-online-boutique
+      MONITORING_CHART: k8s/charts/silicon-boutique-monitoring
+      ARTIFACTS_DIR: artifacts
       REGION: ${{ inputs.region }}
       ZONE: ${{ inputs.zone }}
       SECONDARY_ZONE: ${{ inputs.secondary_zone }}
@@ -79,27 +142,133 @@ jobs:
       PROCESSOR_FAMILY: ${{ inputs.processor_family }}
       CPU_PLATFORM: ${{ inputs.cpu_platform }}
       ARCHITECTURE: ${{ inputs.architecture }}
+      CONCURRENT_USERS: ${{ inputs.concurrent_users }}
+      USERS_PER_SECOND: ${{ inputs.users_per_second }}
+      LOAD_PROFILE_SOURCE: ${{ inputs.load_profile_source }}
+      TEST_DURATION: ${{ inputs.test_duration }}
       PRICING_MODEL: ${{ inputs.pricing_model }}
+      PROJECT_ID: ${{ inputs.bigquery_project_id }}
+      BIGQUERY_PROJECT_ID: ${{ inputs.bigquery_project_id }}
+      BIGQUERY_DATASET: ${{ inputs.bigquery_dataset }}
+      BIGQUERY_TABLE: ${{ inputs.bigquery_table }}
+      BIGQUERY_LOCATION: ${{ inputs.bigquery_location }}
+      FAILURE_STAGE: ${{ inputs.failure_stage }}
+      ACCEPTANCE_DEMO: ${{ inputs.acceptance_demo }}
+      SUMMARY_ARTIFACT_NAME: benchmark-aws-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Authenticate to Google Cloud for BigQuery
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.BIGQUERY_PROJECT_ID }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      - name: Validate AWS Terraform scaffold
-        working-directory: ${{ env.TERRAFORM_DIR }}
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Prepare run metadata
         shell: bash
         run: |
           set -euo pipefail
 
-          terraform fmt -check -recursive
-          terraform init -backend=false -input=false
-          terraform validate
-          terraform plan -refresh=false -input=false \
+          run_id="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ ! "$run_id" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || [[ ${#run_id} -gt 30 ]]; then
+            echo "Generated run_id is not Terraform-compatible: $run_id" >&2
+            exit 1
+          fi
+
+          case "$TEST_DURATION" in
+            *m)
+              duration_seconds="${TEST_DURATION%m}"
+              duration_seconds=$((duration_seconds * 60))
+              ;;
+            *h)
+              duration_seconds="${TEST_DURATION%h}"
+              duration_seconds=$((duration_seconds * 3600))
+              ;;
+            *s)
+              duration_seconds="${TEST_DURATION%s}"
+              ;;
+            *)
+              duration_seconds="$TEST_DURATION"
+              ;;
+          esac
+
+          if [[ ! "$duration_seconds" =~ ^[0-9]+$ ]] || [[ "$duration_seconds" -le 0 ]]; then
+            echo "test_duration must be a positive number of seconds, Nm, or Nh. Got: $TEST_DURATION" >&2
+            exit 1
+          fi
+
+          case "$PRICING_MODEL" in
+            spot)
+              enable_spot_nodes=true
+              ;;
+            on_demand)
+              enable_spot_nodes=false
+              ;;
+            *)
+              echo "pricing_model must be spot or on_demand for AWS runs. Got: $PRICING_MODEL" >&2
+              exit 1
+              ;;
+          esac
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "RUN_ID=$run_id"
+            echo "NAMESPACE=$run_id"
+            echo "TEST_DURATION_SECONDS=$duration_seconds"
+            echo "ENABLE_SPOT_NODES=$enable_spot_nodes"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize Terraform
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform init -input=false
+
+      - name: Validate Terraform
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform validate
+
+      - name: Provision EKS benchmark environment
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set -o pipefail
+
+          mkdir -p "$GITHUB_WORKSPACE/$ARTIFACTS_DIR"
+          {
+            echo "apply_started=true"
+            echo "run_id=$RUN_ID"
+            echo "region=$REGION"
+            echo "zone=$ZONE"
+            echo "secondary_zone=$SECONDARY_ZONE"
+          } > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env"
+
+          set +e
+          terraform apply -auto-approve \
+            -var="static_validation_mode=false" \
+            -var="run_id=$RUN_ID" \
             -var="region=$REGION" \
             -var="zone=$ZONE" \
             -var="secondary_zone=$SECONDARY_ZONE" \
@@ -109,25 +278,565 @@ jobs:
             -var="cpu_platform=$CPU_PLATFORM" \
             -var="architecture=$ARCHITECTURE" \
             -var="pricing_model=$PRICING_MODEL" \
-            -var="enable_spot_nodes=$([[ "$PRICING_MODEL" == "spot" ]] && echo true || echo false)"
+            -var="enable_spot_nodes=$ENABLE_SPOT_NODES"
+          apply_exit_code="$?"
+          set -e
 
-      - name: Summarize scaffold boundary
+          {
+            echo "apply_exit_code=$apply_exit_code"
+            echo "apply_succeeded=$([[ "$apply_exit_code" -eq 0 ]] && echo true || echo false)"
+          } >> "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env"
+
+          exit "$apply_exit_code"
+
+      - name: Inject failure after provisioning
+        if: ${{ inputs.failure_stage == 'after_provision' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=after_provision." >&2
+          exit 42
+
+      - name: Capture Terraform outputs
+        working-directory: ${{ env.TERRAFORM_DIR }}
         shell: bash
         run: |
+          set -euo pipefail
+
           {
-            echo "### AWS EKS Scaffold"
+            echo "RUN_ID=$(terraform output -raw run_id)"
+            echo "ENVIRONMENT=$(terraform output -raw environment)"
+            echo "MACHINE_TYPE=$(terraform output -raw machine_type)"
+            echo "PROCESSOR_FAMILY=$(terraform output -raw processor_family)"
+            echo "ARCHITECTURE=$(terraform output -raw architecture)"
+            echo "CLUSTER_NAME=$(terraform output -raw cluster_name)"
+            echo "GET_CREDENTIALS_COMMAND=$(terraform output -raw get_credentials_command)"
+          } >> "$GITHUB_ENV"
+
+          terraform output -json managed_resource_names > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/managed-resource-names.json"
+          terraform output -json tags > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/terraform-labels.json"
+          terraform output -json teardown_check_commands > "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-check-commands.json"
+
+      - name: Configure kubectl for EKS
+        run: timeout 5m bash -c "$GET_CREDENTIALS_COMMAND"
+
+      - name: Install Helm post-renderer plugin
+        run: |
+          helm plugin list | awk 'NR > 1 {print $1}' | grep -qx silicon-boutique-metadata \
+            || helm plugin install "$WORKLOAD_CHART/post-renderer"
+
+      - name: Deploy workload chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm dependency update "$WORKLOAD_CHART"
+          helm lint "$WORKLOAD_CHART"
+          helm upgrade --install "$WORKLOAD_RELEASE" "./$WORKLOAD_CHART" \
+            --namespace "$NAMESPACE" \
+            --create-namespace \
+            --set-string siliconBoutique.runId="$RUN_ID" \
+            --set-string siliconBoutique.environment="$ENVIRONMENT" \
+            --set-string siliconBoutique.machineType="$MACHINE_TYPE" \
+            --set-string siliconBoutique.processorFamily="$PROCESSOR_FAMILY" \
+            --set-string siliconBoutique.architecture="$ARCHITECTURE" \
+            --set siliconBoutique.loadGenerator.concurrentUsers="$CONCURRENT_USERS" \
+            --set siliconBoutique.loadGenerator.usersPerSecond="$USERS_PER_SECOND" \
+            --set-string siliconBoutique.loadGenerator.testDuration="$TEST_DURATION" \
+            --post-renderer silicon-boutique-metadata
+
+      - name: Wait for workload readiness
+        run: |
+          kubectl wait deployment --all \
+            --for=condition=Available \
+            --timeout=10m \
+            --namespace "$NAMESPACE"
+
+      - name: Deploy monitoring chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm dependency update "$MONITORING_CHART"
+          helm lint "$MONITORING_CHART"
+          helm upgrade --install "$MONITORING_RELEASE" "./$MONITORING_CHART" \
+            --namespace "$NAMESPACE" \
+            --set-string siliconBoutique.runId="$RUN_ID" \
+            --set-string siliconBoutique.environment="$ENVIRONMENT" \
+            --set-string siliconBoutique.machineType="$MACHINE_TYPE" \
+            --set-string siliconBoutique.processorFamily="$PROCESSOR_FAMILY" \
+            --set-string siliconBoutique.architecture="$ARCHITECTURE" \
+            --set-string siliconBoutique.workloadNamespace="$NAMESPACE"
+
+      - name: Wait for monitoring readiness
+        run: |
+          kubectl rollout status deployment/sb-monitoring-grafana \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl rollout status deployment/sb-monitoring-kube-state-metrics \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl rollout status deployment/sb-monitoring-prometheus-blackbox-exporter \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl rollout status daemonset/sb-monitoring-prometheus-node-exporter \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+          kubectl wait pod \
+            --for=condition=Ready \
+            --selector app.kubernetes.io/name=prometheus \
+            --timeout=10m \
+            --namespace "$NAMESPACE"
+
+      - name: Inject failure after monitoring readiness
+        if: ${{ inputs.failure_stage == 'after_monitoring_ready' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=after_monitoring_ready." >&2
+          exit 42
+
+      - name: Start benchmark load generator
+        run: |
+          kubectl rollout restart deployment/loadgenerator --namespace "$NAMESPACE"
+          kubectl rollout status deployment/loadgenerator \
+            --namespace "$NAMESPACE" \
+            --timeout=10m
+
+      - name: Run benchmark window
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          benchmark_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sleep "$TEST_DURATION_SECONDS"
+          benchmark_end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          {
+            echo "BENCHMARK_START=$benchmark_start"
+            echo "BENCHMARK_END=$benchmark_end"
+          } >> "$GITHUB_ENV"
+
+      - name: Update dashboard benchmark window
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "$MONITORING_RELEASE" "./$MONITORING_CHART" \
+            --namespace "$NAMESPACE" \
+            --reuse-values \
+            --set-string siliconBoutique.benchmarkStart="$BENCHMARK_START" \
+            --set-string siliconBoutique.benchmarkEnd="$BENCHMARK_END"
+
+      - name: Inject failure before extraction
+        if: ${{ inputs.failure_stage == 'before_extract' }}
+        run: |
+          echo "Controlled failure requested with failure_stage=before_extract." >&2
+          exit 42
+
+      - name: Extract Prometheus metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl port-forward service/sb-monitoring-kube-prometh-prometheus \
+            9090:9090 \
+            --namespace "$NAMESPACE" &
+          port_forward_pid="$!"
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:9090/-/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:9090/-/ready >/dev/null
+
+          python3 automation/scripts/extract_prometheus_metrics.py \
+            --prometheus-url http://127.0.0.1:9090 \
+            --run-id "$RUN_ID" \
+            --namespace "$NAMESPACE" \
+            --start "$BENCHMARK_START" \
+            --end "$BENCHMARK_END" \
+            --step 15s \
+            --output "$ARTIFACTS_DIR/prometheus-metrics.json" \
+            --strict
+
+      - name: Extract load generator stats
+        run: |
+          kubectl logs deployment/loadgenerator \
+            --namespace "$NAMESPACE" > "$ARTIFACTS_DIR/loadgenerator.log"
+          python3 automation/scripts/extract_loadgenerator_stats.py \
+            --logs-input "$ARTIFACTS_DIR/loadgenerator.log" \
+            --output "$ARTIFACTS_DIR/loadgenerator-stats.json" \
+            --run-id "$RUN_ID" \
+            --strict
+
+      - name: Generate benchmark summary
+        run: |
+          python3 automation/scripts/generate_benchmark_summary.py \
+            --metrics-input "$ARTIFACTS_DIR/prometheus-metrics.json" \
+            --loadgenerator-stats "$ARTIFACTS_DIR/loadgenerator-stats.json" \
+            --summary-output "$ARTIFACTS_DIR/benchmark-summary.json" \
+            --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
+            --environment "$ENVIRONMENT" \
+            --machine-type "$MACHINE_TYPE" \
+            --processor-family "$PROCESSOR_FAMILY" \
+            --architecture "$ARCHITECTURE" \
+            --cloud-provider aws \
+            --region "$REGION" \
+            --zone "$ZONE" \
+            --node-count "$NODE_COUNT" \
+            --pricing-model "$PRICING_MODEL" \
+            --cpu-platform "$CPU_PLATFORM" \
+            --pricing-table automation/templates/machine-pricing.json \
+            --concurrent-users "$CONCURRENT_USERS" \
+            --users-per-second "$USERS_PER_SECOND" \
+            --load-profile-source "$LOAD_PROFILE_SOURCE" \
+            --strict
+
+      - name: Validate benchmark summary
+        run: |
+          python3 automation/scripts/validate_benchmark_comparability.py \
+            --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
+            --schema automation/templates/benchmark-summary.schema.json \
+            --report-output "$ARTIFACTS_DIR/comparability-report.json" \
+            --run-id "$RUN_ID" \
+            --mode summary \
+            --min-duration-seconds 1200 \
+            --min-coverage-ratio 0.95 \
+            --strict
+
+      - name: Persist benchmark summary to BigQuery
+        run: |
+          python3 automation/scripts/load_benchmark_summary_to_bigquery.py \
+            --summary-store "$ARTIFACTS_DIR/benchmark-summaries.ndjson" \
+            --project-id "$BIGQUERY_PROJECT_ID" \
+            --dataset-id "$BIGQUERY_DATASET" \
+            --table-id "$BIGQUERY_TABLE" \
+            --location "$BIGQUERY_LOCATION" \
+            --schema automation/templates/benchmark-summary.bigquery-schema.json \
+            --load-report-output "$ARTIFACTS_DIR/bigquery-load-report.json" \
+            --duplicate-policy fail \
+            --run-id "$RUN_ID"
+
+      - name: Verify acceptance demo evidence
+        if: ${{ inputs.acceptance_demo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 automation/scripts/write_workflow_trace.py \
+            --artifacts-dir "$ARTIFACTS_DIR"
+
+          python3 automation/scripts/run_acceptance_demo.py \
+            --mode verify \
+            --run-id "$RUN_ID" \
+            --namespace "$NAMESPACE" \
+            --artifacts-dir "$ARTIFACTS_DIR" \
+            --cloud-provider aws \
+            --require-bigquery
+
+          python3 automation/scripts/render_acceptance_summary.py \
+            --report "$ARTIFACTS_DIR/acceptance-demo-report.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture teardown precheck
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "teardown_precheck_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "namespace=${NAMESPACE:-}"
+            echo "region=${REGION:-}"
+            echo "cluster_name=${CLUSTER_NAME:-}"
             echo
-            echo "This workflow validates the Terraform scaffold only. It does not authenticate to AWS, apply resources, deploy Helm charts, run benchmarks, or load BigQuery rows."
+          } > "$ARTIFACTS_DIR/teardown-precheck.txt"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; no run-scoped AWS teardown precheck is required." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+            exit 0
+          fi
+
+          if [[ -n "${GET_CREDENTIALS_COMMAND:-}" ]]; then
+            timeout 5m bash -c "$GET_CREDENTIALS_COMMAND" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "GET_CREDENTIALS_COMMAND is unavailable; skipping kubeconfig refresh." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+          if [[ -n "${NAMESPACE:-}" ]] && kubectl version --client >/dev/null 2>&1; then
+            timeout 2m kubectl get namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            timeout 2m kubectl get pods,services --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "Namespace or kubectl is unavailable; skipping Kubernetes precheck." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+          if command -v aws >/dev/null 2>&1 && [[ -n "${REGION:-}" ]] && [[ -n "${RUN_ID:-}" ]]; then
+            if [[ -n "${CLUSTER_NAME:-}" ]]; then
+              timeout 2m aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            fi
+            timeout 2m aws ec2 describe-vpcs --region "$REGION" --filters "Name=tag:RunId,Values=$RUN_ID" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+            timeout 2m aws ec2 describe-subnets --region "$REGION" --filters "Name=tag:RunId,Values=$RUN_ID" >> "$ARTIFACTS_DIR/teardown-precheck.txt" 2>&1
+          else
+            echo "aws, region, or run ID is unavailable; skipping AWS precheck." >> "$ARTIFACTS_DIR/teardown-precheck.txt"
+          fi
+
+      - name: Uninstall Helm releases
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "helm_cleanup_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "namespace=${NAMESPACE:-}"
+            echo
+          } > "$ARTIFACTS_DIR/helm-cleanup.log"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; skipping Helm cleanup." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          if [[ -z "${NAMESPACE:-}" ]]; then
+            echo "NAMESPACE is unavailable; skipping Helm cleanup." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          if [[ -n "${GET_CREDENTIALS_COMMAND:-}" ]]; then
+            timeout 5m bash -c "$GET_CREDENTIALS_COMMAND" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1
+          else
+            echo "GET_CREDENTIALS_COMMAND is unavailable; attempting cleanup with current kubeconfig." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+          fi
+
+          if ! kubectl get namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1; then
+            echo "Benchmark namespace is unavailable; skipping Helm uninstall." >> "$ARTIFACTS_DIR/helm-cleanup.log"
+            exit 0
+          fi
+
+          timeout 5m helm uninstall "$MONITORING_RELEASE" --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1 || true
+          timeout 5m helm uninstall "$WORKLOAD_RELEASE" --namespace "$NAMESPACE" >> "$ARTIFACTS_DIR/helm-cleanup.log" 2>&1 || true
+
+      - name: Destroy EKS benchmark environment
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$GITHUB_WORKSPACE/$ARTIFACTS_DIR"
+          teardown_status="$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-status.env"
+          teardown_log="$GITHUB_WORKSPACE/$ARTIFACTS_DIR/teardown-destroy.log"
+
+          {
+            echo "destroy_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo "secondary_zone=${SECONDARY_ZONE:-}"
+            echo
+          } > "$teardown_log"
+
+          if [[ ! -f "$GITHUB_WORKSPACE/$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; skipping destroy." >> "$teardown_log"
+            {
+              echo "destroy_attempted=false"
+              echo "destroy_exit_code=0"
+              echo "destroy_succeeded=true"
+              echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > "$teardown_status"
+            exit 0
+          fi
+
+          if [[ -z "${RUN_ID:-}" ]]; then
+            echo "RUN_ID is unavailable; refusing to run Terraform destroy without a run scope." >> "$teardown_log"
+            {
+              echo "destroy_attempted=false"
+              echo "destroy_exit_code=2"
+              echo "destroy_succeeded=false"
+              echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > "$teardown_status"
+            exit 2
+          fi
+
+          timeout 45m terraform destroy -auto-approve \
+            -var="static_validation_mode=false" \
+            -var="run_id=$RUN_ID" \
+            -var="region=$REGION" \
+            -var="zone=$ZONE" \
+            -var="secondary_zone=$SECONDARY_ZONE" \
+            -var="machine_type=$MACHINE_TYPE" \
+            -var="node_count=$NODE_COUNT" \
+            -var="processor_family=$PROCESSOR_FAMILY" \
+            -var="cpu_platform=$CPU_PLATFORM" \
+            -var="architecture=$ARCHITECTURE" \
+            -var="pricing_model=$PRICING_MODEL" \
+            -var="enable_spot_nodes=$ENABLE_SPOT_NODES" >> "$teardown_log" 2>&1
+          destroy_exit_code="$?"
+
+          {
+            echo "destroy_attempted=true"
+            echo "destroy_exit_code=$destroy_exit_code"
+            echo "destroy_succeeded=$([[ "$destroy_exit_code" -eq 0 ]] && echo true || echo false)"
+            echo "destroy_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$teardown_status"
+
+          exit "$destroy_exit_code"
+
+      - name: Capture teardown postcheck
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p "$ARTIFACTS_DIR"
+          {
+            echo "teardown_postcheck_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=${RUN_ID:-}"
+            echo "region=${REGION:-}"
+            echo "cluster_name=${CLUSTER_NAME:-}"
+            echo
+          } > "$ARTIFACTS_DIR/teardown-postcheck.txt"
+
+          if [[ ! -f "$ARTIFACTS_DIR/provision-status.env" ]]; then
+            echo "Terraform apply was not attempted; no run-scoped AWS teardown postcheck is required." >> "$ARTIFACTS_DIR/teardown-postcheck.txt"
+            exit 0
+          fi
+
+          if command -v aws >/dev/null 2>&1 && [[ -n "${REGION:-}" ]] && [[ -n "${RUN_ID:-}" ]]; then
+            if [[ -n "${CLUSTER_NAME:-}" ]]; then
+              timeout 2m aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+            fi
+            timeout 2m aws ec2 describe-vpcs --region "$REGION" --filters "Name=tag:RunId,Values=$RUN_ID" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+            timeout 2m aws ec2 describe-subnets --region "$REGION" --filters "Name=tag:RunId,Values=$RUN_ID" >> "$ARTIFACTS_DIR/teardown-postcheck.txt" 2>&1
+          else
+            echo "aws, region, or run ID is unavailable; skipping AWS postcheck." >> "$ARTIFACTS_DIR/teardown-postcheck.txt"
+          fi
+
+      - name: Capture workflow traceability outputs
+        id: traceability
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$ARTIFACTS_DIR"
+          summary_path="$ARTIFACTS_DIR/benchmark-summary.json"
+          summary_store_path="$ARTIFACTS_DIR/benchmark-summaries.ndjson"
+          loadgenerator_stats_path="$ARTIFACTS_DIR/loadgenerator-stats.json"
+          bigquery_load_report_path="$ARTIFACTS_DIR/bigquery-load-report.json"
+          acceptance_report_path="$ARTIFACTS_DIR/acceptance-demo-report.json"
+          bigquery_summary_table="${BIGQUERY_PROJECT_ID:-}.${BIGQUERY_DATASET:-}.${BIGQUERY_TABLE:-}"
+          trace_path="$ARTIFACTS_DIR/workflow-trace.json"
+          trace_env_path="$ARTIFACTS_DIR/workflow-trace.env"
+          destroy_attempted="unknown"
+          destroy_succeeded="unknown"
+
+          if [[ -f "$ARTIFACTS_DIR/teardown-status.env" ]]; then
+            # shellcheck disable=SC1090
+            source "$ARTIFACTS_DIR/teardown-status.env"
+            destroy_attempted="${destroy_attempted:-unknown}"
+            destroy_succeeded="${destroy_succeeded:-unknown}"
+          fi
+
+          environment="${ENVIRONMENT:-aws}"
+          cloud_provider="aws"
+          benchmark_start="${BENCHMARK_START:-}"
+          benchmark_end="${BENCHMARK_END:-}"
+          export TRACE_ENVIRONMENT="$environment"
+          export TRACE_CLOUD_PROVIDER="$cloud_provider"
+          export TRACE_BENCHMARK_START="$benchmark_start"
+          export TRACE_BENCHMARK_END="$benchmark_end"
+          export TRACE_DESTROY_ATTEMPTED="$destroy_attempted"
+          export TRACE_DESTROY_SUCCEEDED="$destroy_succeeded"
+          export TRACE_BIGQUERY_LOAD_REPORT_PATH="$bigquery_load_report_path"
+          export TRACE_BIGQUERY_SUMMARY_TABLE="$bigquery_summary_table"
+          export TRACE_ACCEPTANCE_REPORT_PATH="$acceptance_report_path"
+
+          python3 automation/scripts/write_workflow_trace.py \
+            --artifacts-dir "$ARTIFACTS_DIR"
+
+          {
+            echo "run_id=${RUN_ID:-}"
+            echo "environment=$environment"
+            echo "cloud_provider=$cloud_provider"
+            echo "project_id=${BIGQUERY_PROJECT_ID:-}"
+            echo "region=${REGION:-}"
+            echo "zone=${ZONE:-}"
+            echo "machine_type=${MACHINE_TYPE:-}"
+            echo "processor_family=${PROCESSOR_FAMILY:-}"
+            echo "cpu_platform=${CPU_PLATFORM:-}"
+            echo "architecture=${ARCHITECTURE:-}"
+            echo "node_count=${NODE_COUNT:-}"
+            echo "pricing_model=${PRICING_MODEL:-}"
+            echo "namespace=${NAMESPACE:-}"
+            echo "benchmark_start=$benchmark_start"
+            echo "benchmark_end=$benchmark_end"
+            echo "summary_artifact_name=$SUMMARY_ARTIFACT_NAME"
+            echo "summary_path=$summary_path"
+            echo "summary_store_path=$summary_store_path"
+            echo "loadgenerator_stats_path=$loadgenerator_stats_path"
+            echo "bigquery_dataset=${BIGQUERY_DATASET:-}"
+            echo "bigquery_table=${BIGQUERY_TABLE:-}"
+            echo "bigquery_location=${BIGQUERY_LOCATION:-}"
+            echo "bigquery_summary_table=$bigquery_summary_table"
+            echo "bigquery_load_report_path=$bigquery_load_report_path"
+            echo "acceptance_report_path=$acceptance_report_path"
+            echo "trace_path=$trace_path"
+            echo "teardown_succeeded=$destroy_succeeded"
+            echo "destroy_attempted=$destroy_attempted"
+            echo "failure_stage=${FAILURE_STAGE:-}"
+          } > "$trace_env_path"
+
+          cat "$trace_env_path" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### AWS Benchmark Traceability"
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| cloud_provider | \`aws\` |"
-            echo "| region | \`$REGION\` |"
-            echo "| zone | \`$ZONE\` |"
-            echo "| machine_type | \`$MACHINE_TYPE\` |"
-            echo "| node_count | \`$NODE_COUNT\` |"
-            echo "| processor_family | \`$PROCESSOR_FAMILY\` |"
+            echo "| run_id | \`${RUN_ID:-}\` |"
+            echo "| artifact | \`$SUMMARY_ARTIFACT_NAME\` |"
+            echo "| machine_type | \`${MACHINE_TYPE:-}\` |"
+            echo "| processor_family | \`${PROCESSOR_FAMILY:-}\` |"
             echo "| cpu_platform | \`${CPU_PLATFORM:-}\` |"
-            echo "| architecture | \`$ARCHITECTURE\` |"
-            echo "| pricing_model | \`$PRICING_MODEL\` |"
+            echo "| architecture | \`${ARCHITECTURE:-}\` |"
+            echo "| node_count | \`${NODE_COUNT:-}\` |"
+            echo "| pricing_model | \`${PRICING_MODEL:-}\` |"
+            echo "| benchmark_start | \`$benchmark_start\` |"
+            echo "| benchmark_end | \`$benchmark_end\` |"
+            echo "| summary_path | \`$summary_path\` |"
+            echo "| bigquery_summary_table | \`$bigquery_summary_table\` |"
+            echo "| bigquery_load_report_path | \`$bigquery_load_report_path\` |"
+            echo "| acceptance_report_path | \`$acceptance_report_path\` |"
+            echo "| teardown_succeeded | \`$destroy_succeeded\` |"
+            echo "| failure_stage | \`${FAILURE_STAGE:-}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SUMMARY_ARTIFACT_NAME }}
+          path: artifacts/
+          if-no-files-found: warn
+
+      - name: Verify teardown status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "$ARTIFACTS_DIR/teardown-status.env" ]]; then
+            echo "Missing teardown status artifact; cleanup did not reach the Terraform destroy step." >&2
+            exit 1
+          fi
+
+          # shellcheck disable=SC1090
+          source "$ARTIFACTS_DIR/teardown-status.env"
+          if [[ "${destroy_succeeded:-false}" != "true" ]]; then
+            echo "Terraform destroy failed or was refused; inspect artifacts/teardown-destroy.log." >&2
+            exit 1
+          fi

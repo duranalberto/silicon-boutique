@@ -10,7 +10,7 @@ For first-time local setup and day-one usage, start with [`docs/local-usage.md`]
 4. Review `docs/spec-driven-development.md` and `docs/project-layout.md`.
 5. Review `docs/architecture.md` and `docs/roadmap.md` for the current pipeline language and phase order.
 
-The devcontainer pins the local toolchain baseline used by Phase 0 validation:
+The devcontainer pins the local toolchain baseline:
 
 | Tool | Baseline |
 | --- | --- |
@@ -37,7 +37,7 @@ Run the reusable check any time the container is rebuilt or the local environmen
 
 ## Naming and Labels
 
-Every benchmark run is keyed by one DNS-safe `run_id`. When a caller does not provide one, Terraform generates a stable ID in state. Local resource names use `silicon-boutique-${run_id}` and GCP resource names use `sb-${run_id}` with resource suffixes such as `-vpc` and `-subnet`.
+Every benchmark run is keyed by one DNS-safe `run_id`. When a caller does not provide one, Terraform generates a stable ID in state. Local resource names use `silicon-boutique-${run_id}`. GCP and AWS resource names use `sb-${run_id}` with provider-specific suffixes where needed.
 
 All label-capable resources must carry the run metadata needed for traceability:
 
@@ -47,9 +47,9 @@ All label-capable resources must carry the run metadata needed for traceability:
 - `processor_family` or `silicon-boutique/processor-family`
 - `architecture` or `silicon-boutique/architecture`
 - Canonical summary rows must also include normalized `region`, `zone`, `node_count`, `pricing_model`, `load_profile_source`, and optional `cpu_platform`.
-- `managed_by=terraform` where the platform supports plain GCP labels
+- Terraform ownership metadata where the platform supports labels or tags
 
-The Terraform roots expose the rendered labels and selectors with `terraform output labels`, `terraform output kubernetes_label_selector`, or `terraform output gcp_label_filter`.
+The Terraform roots expose rendered labels, tags, selectors, and teardown checks through outputs such as `labels`, `tags`, `kubernetes_label_selector`, `gcp_label_filter`, `aws_tag_filter`, and `teardown_check_commands`.
 
 ## Local Terraform Validation
 
@@ -92,7 +92,7 @@ To inspect the Grafana dashboard after a local automated run, use `--skip-destro
 
 ## Acceptance Demo
 
-Use the acceptance demo when you want one command that proves the required use case end to end. The local path provisions the benchmark namespace, deploys Online Boutique and monitoring, runs the load generator, extracts Prometheus and load-generator metrics, generates and validates a `BenchmarkSummary`, verifies Grafana dashboard evidence, writes `artifacts/acceptance-demo-report.json`, and then tears down the namespace.
+Use the acceptance demo when you want one command that proves the required use case end to end. The local path provisions the benchmark namespace, deploys Online Boutique and monitoring, runs the load generator, extracts Prometheus and load-generator metrics, generates and validates a `BenchmarkSummary`, verifies Grafana dashboard evidence through the Grafana API, writes `artifacts/acceptance-demo-report.json`, and then tears down the namespace.
 
 ```bash
 python3 automation/scripts/run_acceptance_demo.py --mode local
@@ -127,7 +127,7 @@ python3 automation/scripts/run_acceptance_demo.py \
   --dashboard-hold-seconds 120
 ```
 
-The GCP benchmark workflow supports the same acceptance evidence path through the `acceptance_demo` dispatch input. When enabled, `.github/workflows/benchmark.yml` verifies the dashboard ConfigMap, Prometheus metric artifact, canonical summary, BigQuery load report, and acceptance `run_id` before teardown. It does not publish Grafana publicly; dashboard location is represented by the Grafana service name and dashboard UID in `acceptance-demo-report.json` and the GitHub step summary.
+The GCP and AWS benchmark workflows support the same acceptance evidence path through the `acceptance_demo` dispatch input. When enabled, `.github/workflows/benchmark.yml` and `.github/workflows/benchmark-aws.yml` verify the dashboard ConfigMap, live Grafana dashboard API response, Prometheus metric artifact, canonical summary, BigQuery load report, and acceptance `run_id` before teardown. They do not publish Grafana publicly; dashboard location is represented by the Grafana service name and dashboard UID in `acceptance-demo-report.json` and the GitHub step summary. Grafana authentication uses the generated `sb-monitoring-grafana` admin secret.
 
 Expected acceptance artifacts:
 
@@ -140,9 +140,49 @@ Expected acceptance artifacts:
 - `loadgenerator-stats.json`
 - `bigquery-load-report.json` when BigQuery persistence runs
 
+## Acceptance Matrix
+
+Use the acceptance matrix when you need one report that ties local smoke evidence, GCP live evidence, AWS live evidence, dashboard API proof, durable summary storage, comparison output, and teardown status together:
+
+```bash
+python3 automation/scripts/run_acceptance_matrix.py --mode local
+```
+
+Local mode runs the local acceptance demo and records GCP/AWS checks as `skipped_requires_credentials`. To verify downloaded cloud artifacts without launching infrastructure:
+
+```bash
+python3 automation/scripts/run_acceptance_matrix.py \
+  --mode verify \
+  --gcp-artifacts artifacts/gcp-run \
+  --aws-artifacts artifacts/aws-run
+```
+
+Full mode runs local acceptance and verifies supplied GCP/AWS artifact directories:
+
+```bash
+python3 automation/scripts/run_acceptance_matrix.py \
+  --mode full \
+  --gcp-artifacts artifacts/gcp-run \
+  --aws-artifacts artifacts/aws-run
+```
+
+The matrix writes `artifacts/acceptance-matrix-report.json` plus a combined `acceptance-matrix-comparison.json` and Markdown report when both GCP and AWS artifact sets are accepted. Each supplied cloud artifact directory must contain matching `workflow-trace.json`, `benchmark-summary.json`, `acceptance-demo-report.json`, `comparability-report.json`, `bigquery-load-report.json`, and `teardown-status.env` for the same `run_id`.
+
+## Definition of Done and Acceptance Evidence
+
+A benchmark path is considered accepted when one `run_id` has evidence for each required boundary:
+
+- Workload and monitoring deployed successfully, with Terraform and Helm metadata captured in the trace artifacts.
+- `prometheus-metrics.json` and `loadgenerator-stats.json` exist for the measured benchmark window.
+- `benchmark-summary.json` and `benchmark-summaries.ndjson` contain the same `run_id` and pass summary validation.
+- `acceptance-demo-report.json` reports `checks.dashboard.grafana_load_status.status` as `passed` and includes the expected dashboard UID and title.
+- Live GCP and AWS runs include `bigquery-load-report.json` proving the canonical row was loaded, or local runs explicitly record BigQuery as optional.
+- Multi-run comparison evidence includes `comparison-report.json` or `acceptance-matrix-comparison.json` with comparable rows or explicit rejected-row reasons.
+- `teardown-status.env` records that destroy was attempted and succeeded, with precheck and postcheck logs available for cloud runs.
+
 ## Local Workload Validation
 
-After local Terraform creates the benchmark namespace, deploy the P2 workload chart into that namespace. The chart pins Google's `onlineboutique` Helm chart to `0.10.5` and uses a post-renderer to apply SiliconBoutique run labels, teardown annotations, and load-generator settings to rendered resources.
+After local Terraform creates the benchmark namespace, deploy the workload chart into that namespace. The chart pins Google's `onlineboutique` Helm chart to `0.10.5` and uses a post-renderer to apply SiliconBoutique run labels, teardown annotations, and load-generator settings to rendered resources.
 
 ```bash
 cd infra/terraform/local-kubernetes
@@ -184,7 +224,7 @@ kubectl get pods,services --namespace "$namespace" --context siliconboutique
 
 ## Local Monitoring Validation
 
-After the local workload is installed and ready, deploy the P2.3 monitoring chart into the same Terraform-owned namespace. The chart installs Prometheus with 24-hour retention, Grafana with a private ClusterIP service, Kubernetes metric exporters, a blackbox frontend probe for HTTP latency, and the `SiliconBoutique Online Boutique Benchmark` dashboard.
+After the local workload is installed and ready, deploy the monitoring chart into the same Terraform-owned namespace. The chart installs Prometheus with 24-hour retention, Grafana with a private ClusterIP service, Kubernetes metric exporters, a blackbox frontend probe for HTTP latency, and the `SiliconBoutique Online Boutique Benchmark` dashboard.
 
 ```bash
 helm dependency update k8s/charts/silicon-boutique-monitoring
@@ -280,7 +320,7 @@ curl -fsG "$prometheus" --data-urlencode "query=probe_duration_seconds{silicon_b
 curl -fsG "$prometheus" --data-urlencode "query=silicon_boutique:frontend_probe_latency_seconds"
 ```
 
-Extract the benchmark window into structured P3.1 metrics JSON. Set the window to the actual load-test period; the example below uses the latest 20 minutes:
+Extract the benchmark window into structured metrics JSON. Set the window to the actual load-test period; the example below uses the latest 20 minutes:
 
 ```bash
 benchmark_end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -311,7 +351,7 @@ python3 automation/scripts/extract_loadgenerator_stats.py \
   --strict
 ```
 
-Generate the P3.2 benchmark summary and persist a local BigQuery-ready NDJSON row. The summary includes `avg_cpu_utilization_pct`, `max_cpu_utilization_pct`, request volume, load-profile metadata, and nullable cost fields:
+Generate the benchmark summary and persist a local BigQuery-ready NDJSON row. The summary includes `avg_cpu_utilization_pct`, `max_cpu_utilization_pct`, request volume, load-profile metadata, and nullable cost fields:
 
 ```bash
 python3 automation/scripts/generate_benchmark_summary.py \
@@ -425,13 +465,13 @@ terraform destroy -auto-approve
 
 ## Cloud Rollout
 
-1. Use GCP for the first cloud benchmark target after local validation is complete.
-2. Treat AWS EKS as scaffolded until credentials, IAM, live apply, and teardown are explicitly promoted.
+1. Use local validation before any live cloud run.
+2. Use GCP or AWS only in a sandbox project/account with confirmed quota and teardown windows.
 3. Confirm cloud credentials and Terraform state are configured before applying.
 4. Run the same deployment and benchmark flow used in local Kubernetes.
 5. Preserve teardown discipline to avoid leaving cloud resources running.
 
-Validate the AWS EKS scaffold without AWS credentials:
+Validate the AWS EKS Terraform shape without AWS credentials:
 
 ```bash
 cd infra/terraform/aws-eks
@@ -441,15 +481,52 @@ terraform validate
 terraform plan -refresh=false -input=false
 ```
 
-The AWS root exports the same run metadata used by the GCP workflow, including `cloud_provider=aws`, region, zone, machine type, processor metadata, node count, pricing model, `get_credentials_command`, tags, managed resource names, and teardown check commands. Live AWS execution requires AWS credentials and the `aws` CLI to run `aws eks update-kubeconfig`; do not apply or destroy the scaffold without a confirmed teardown window.
+The AWS root exports the same run metadata used by the GCP workflow, including `cloud_provider=aws`, region, zone, machine type, processor metadata, node count, pricing model, `get_credentials_command`, tags, managed resource names, and teardown check commands. Live AWS execution is handled by `.github/workflows/benchmark-aws.yml` and requires `AWS_ROLE_TO_ASSUME`, the existing GCP OIDC secrets for BigQuery loading, and a confirmed teardown window. Do not run apply or destroy outside a sandbox account without inspecting Terraform state and the run-scoped tags first.
 
 ## GitHub Actions Benchmark Workflow
 
-The Phase 4 workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch` so future MCP tooling can trigger the same orchestration boundary through the GitHub Actions API.
+The GCP workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch`; the MCP trigger adapter uses the same orchestration boundary through the GitHub Actions API.
 
-`.github/workflows/benchmark-aws.yml` is scaffold-only. It runs Terraform static validation for `infra/terraform/aws-eks` and records the intended AWS metadata, but it does not authenticate to AWS, apply resources, deploy Helm charts, run benchmarks, or load BigQuery rows.
+The AWS workflow is `.github/workflows/benchmark-aws.yml`. It uses GitHub OIDC with `AWS_ROLE_TO_ASSUME`, provisions EKS with `static_validation_mode=false`, deploys the shared workload and monitoring charts, writes the same artifact names as the GCP workflow, loads the canonical summary to BigQuery, and verifies teardown status before the job completes.
 
-P9.1 through P9.3 add production MCP adapters for dispatching the GCP benchmark workflow, querying live GitHub Actions run state, and reading durable BigQuery benchmark history. Configure the MCP process with:
+Example guarded GCP dispatch:
+
+```bash
+gh workflow run benchmark.yml \
+  -f project_id="$project_id" \
+  -f region=us-central1 \
+  -f zone=us-central1-a \
+  -f machine_type=c3-standard-4 \
+  -f processor_family=c3 \
+  -f architecture=x86_64 \
+  -f pricing_model=spot \
+  -f test_duration=20m \
+  -f bigquery_dataset=silicon_boutique \
+  -f bigquery_table=benchmark_summaries \
+  -f bigquery_location=US \
+  -f acceptance_demo=true
+```
+
+Example guarded AWS dispatch:
+
+```bash
+gh workflow run benchmark-aws.yml \
+  -f region=us-east-1 \
+  -f zone=us-east-1a \
+  -f secondary_zone=us-east-1b \
+  -f machine_type=m7i.xlarge \
+  -f processor_family=m7i \
+  -f architecture=x86_64 \
+  -f pricing_model=spot \
+  -f test_duration=20m \
+  -f bigquery_project_id="$project_id" \
+  -f bigquery_dataset=silicon_boutique \
+  -f bigquery_table=benchmark_summaries \
+  -f bigquery_location=US \
+  -f acceptance_demo=true
+```
+
+The MCP package includes production adapters for dispatching the GCP benchmark workflow, querying live GitHub Actions run state, and reading durable BigQuery benchmark history. Configure the MCP process with:
 
 - `SILICON_BOUTIQUE_GITHUB_TOKEN`, falling back to `GITHUB_TOKEN`
 - `SILICON_BOUTIQUE_GITHUB_REPOSITORY`, falling back to `GITHUB_REPOSITORY`, in `owner/repo` format
@@ -474,7 +551,7 @@ PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp status \
   --run-id gha-123456789-1
 ```
 
-Fixture-backed status remains available by adding `--trace-fixture artifacts/workflow-trace.json`. Live status maps GitHub `queued`, `requested`, `waiting`, and `pending` to `queued`; `in_progress` to `running`; completed successful runs to `completed`; completed non-success conclusions such as `failure`, `cancelled`, `timed_out`, and `skipped` to `failed`; missing or unrecognized states to `unknown`. P9.2 reports workflow state only and does not download artifacts or infer teardown success from `workflow-trace.json`.
+Fixture-backed status remains available by adding `--trace-fixture artifacts/workflow-trace.json`. Live status maps GitHub `queued`, `requested`, `waiting`, and `pending` to `queued`; `in_progress` to `running`; completed successful runs to `completed`; completed non-success conclusions such as `failure`, `cancelled`, `timed_out`, and `skipped` to `failed`; missing or unrecognized states to `unknown`. Status reports workflow state only and does not download artifacts or infer teardown success from `workflow-trace.json`.
 
 Query durable history through BigQuery with the same filters as the fixture-backed command:
 
@@ -559,7 +636,7 @@ python3 automation/scripts/validate_bigquery_summary_load.py \
   --report-output artifacts/bigquery-validation-report.json
 ```
 
-P4.2 guarantees a teardown attempt after Terraform provisioning starts. Terraform apply and destroy remain in the same job so local Terraform state is available to cleanup. Cleanup steps use `if: always()`, Helm uninstall is best-effort and bounded, Terraform destroy is bounded, and the final workflow step fails the job when destroy fails or is refused.
+The workflows guarantee a teardown attempt after Terraform provisioning starts. Terraform apply and destroy remain in the same job so local Terraform state is available to cleanup. Cleanup steps use `if: always()`, Helm uninstall is best-effort and bounded, Terraform destroy is bounded, and the final workflow step fails the job when destroy fails or is refused.
 
 The artifact also includes teardown evidence:
 
@@ -570,7 +647,7 @@ The artifact also includes teardown evidence:
 - `teardown-postcheck.txt`
 - `teardown-status.env`
 
-P4.3 adds traceability outputs for downstream GitHub workflow use and future MCP integration. The benchmark job exposes non-secret outputs for `run_id`, environment, GCP location, machine metadata, benchmark window, summary artifact paths, BigQuery destination, BigQuery load report path, teardown status, and `failure_stage`.
+The benchmark job exposes non-secret traceability outputs for `run_id`, environment, provider location, machine metadata, benchmark window, summary artifact paths, BigQuery destination, BigQuery load report path, teardown status, and `failure_stage`.
 
 The same trace data is available in three places after a run:
 
