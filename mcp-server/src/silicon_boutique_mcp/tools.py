@@ -6,9 +6,11 @@ from dataclasses import asdict
 
 from silicon_boutique_mcp.boundary import BenchmarkHistoryStore, BenchmarkRunController
 from silicon_boutique_mcp.models import (
+    BenchmarkRunRequest,
     GetBenchmarkStatusResponse,
     HistoricalMetricsQuery,
     HistoricalMetricsResponse,
+    RunIdentity,
     ToolDefinition,
 )
 
@@ -21,9 +23,62 @@ class ToolContractError(ValueError):
     """Raised when a tool request does not satisfy the local contract."""
 
 
+TRIGGER_BENCHMARK_RUN_TOOL = ToolDefinition(
+    name="trigger_benchmark_run",
+    description="Dispatch the production GCP benchmark workflow through GitHub Actions.",
+    input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "cloud_provider",
+            "project_id",
+            "region",
+            "zone",
+            "machine_type",
+            "node_count",
+            "processor_family",
+            "architecture",
+            "concurrent_users",
+            "users_per_second",
+            "test_duration",
+        ],
+        "properties": {
+            "cloud_provider": {"type": "string", "const": "gcp"},
+            "project_id": {"type": "string", "minLength": 1},
+            "region": {"type": "string", "minLength": 1},
+            "zone": {"type": "string", "minLength": 1},
+            "machine_type": {"type": "string", "minLength": 1},
+            "node_count": {"type": "integer", "minimum": 1},
+            "processor_family": {"type": "string", "minLength": 1},
+            "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
+            "concurrent_users": {"type": "integer", "minimum": 1},
+            "users_per_second": {"type": "integer", "minimum": 1},
+            "test_duration": {"type": "string", "minLength": 1},
+            "pricing_model": {
+                "type": "string",
+                "enum": ["spot", "on_demand"],
+                "default": "spot",
+            },
+            "cpu_platform": {"type": "string"},
+        },
+    },
+    output_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["run_id"],
+        "properties": {
+            "run_id": {"type": "string"},
+            "external_run_id": {"type": ["string", "null"]},
+            "external_run_url": {"type": ["string", "null"]},
+        },
+    },
+    readiness="production_adapter_ready",
+)
+
+
 GET_BENCHMARK_STATUS_TOOL = ToolDefinition(
     name="get_benchmark_status",
-    description="Check benchmark status from run trace metadata.",
+    description="Check benchmark status from GitHub Actions run state.",
     input_schema={
         "type": "object",
         "additionalProperties": False,
@@ -45,11 +100,12 @@ GET_BENCHMARK_STATUS_TOOL = ToolDefinition(
             "trace": {"type": "object"},
         },
     },
+    readiness="production_adapter_ready",
 )
 
 QUERY_HISTORICAL_METRICS_TOOL = ToolDefinition(
     name="query_historical_metrics",
-    description="Query stored benchmark summary rows by machine metadata.",
+    description="Query BigQuery benchmark summary history by machine metadata.",
     input_schema={
         "type": "object",
         "additionalProperties": False,
@@ -74,16 +130,18 @@ QUERY_HISTORICAL_METRICS_TOOL = ToolDefinition(
             "results": {"type": "array", "items": {"type": "object"}},
         },
     },
+    readiness="production_adapter_ready",
 )
 
 TOOL_DEFINITIONS = (
+    TRIGGER_BENCHMARK_RUN_TOOL,
     GET_BENCHMARK_STATUS_TOOL,
     QUERY_HISTORICAL_METRICS_TOOL,
 )
 
 
 def tool_definitions_as_dicts() -> list[dict[str, object]]:
-    """Return all exposed P5.2 tool contracts as JSON-ready dictionaries."""
+    """Return all exposed tool contracts as JSON-ready dictionaries."""
     return [tool.to_dict() for tool in TOOL_DEFINITIONS]
 
 
@@ -99,6 +157,15 @@ def get_benchmark_status(
         status=trace.status,
         trace=trace,
     )
+
+
+def trigger_benchmark_run(
+    request: BenchmarkRunRequest,
+    run_controller: BenchmarkRunController,
+) -> RunIdentity:
+    """Execute the benchmark trigger contract against a boundary run controller."""
+    validate_benchmark_run_request(request)
+    return run_controller.trigger_benchmark_run(request)
 
 
 def query_historical_metrics(
@@ -126,6 +193,33 @@ def response_to_dict(response: object) -> dict[str, object]:
     return asdict(response)  # type: ignore[arg-type]
 
 
+def validate_benchmark_run_request(request: BenchmarkRunRequest) -> None:
+    """Validate the P9.1 production benchmark trigger contract."""
+    cloud_provider = require_non_empty_string(request.cloud_provider, "cloud_provider")
+    if cloud_provider != "gcp":
+        raise ToolContractError("cloud_provider must be gcp for P9.1")
+
+    require_non_empty_string(request.project_id, "project_id")
+    require_non_empty_string(request.region, "region")
+    require_non_empty_string(request.zone, "zone")
+    require_non_empty_string(request.machine_type, "machine_type")
+    require_non_empty_string(request.processor_family, "processor_family")
+
+    architecture = require_non_empty_string(request.architecture, "architecture")
+    if architecture not in {"x86_64", "arm64"}:
+        raise ToolContractError("architecture must be x86_64 or arm64")
+
+    pricing_model = require_non_empty_string(request.pricing_model, "pricing_model")
+    if pricing_model not in {"spot", "on_demand"}:
+        raise ToolContractError("pricing_model must be spot or on_demand")
+
+    require_positive_int(request.node_count, "node_count")
+    require_positive_int(request.concurrent_users, "concurrent_users")
+    require_positive_int(request.users_per_second, "users_per_second")
+    require_duration(request.test_duration, "test_duration")
+    clean_optional_string(request.cpu_platform, "cpu_platform")
+
+
 def validate_history_query(query: HistoricalMetricsQuery) -> None:
     clean_optional_string(query.machine_type, "machine_type")
     clean_optional_string(query.processor_family, "processor_family")
@@ -142,6 +236,25 @@ def require_non_empty_string(value: str, field_name: str) -> str:
     cleaned = value.strip() if isinstance(value, str) else ""
     if not cleaned:
         raise ToolContractError(f"{field_name} must be a non-empty string")
+    return cleaned
+
+
+def require_positive_int(value: int, field_name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ToolContractError(f"{field_name} must be a positive integer")
+    if value < 1:
+        raise ToolContractError(f"{field_name} must be a positive integer")
+    return value
+
+
+def require_duration(value: str, field_name: str) -> str:
+    cleaned = require_non_empty_string(value, field_name)
+    if cleaned[-1] in {"s", "m", "h"}:
+        number = cleaned[:-1]
+    else:
+        number = cleaned
+    if not number.isdigit() or int(number) < 1:
+        raise ToolContractError(f"{field_name} must be positive seconds, Nm, or Nh")
     return cleaned
 
 

@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Dependency-light MCP boundary contracts for SiliconBoutique."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "mcp>=1.27,<2",
+]
 
 [project.scripts]
 silicon-boutique-mcp = "silicon_boutique_mcp.server:main"
+silicon-boutique-mcp-stdio = "silicon_boutique_mcp.mcp_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

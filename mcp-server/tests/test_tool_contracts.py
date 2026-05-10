@@ -15,11 +15,16 @@ from silicon_boutique_mcp.fixtures import (  # noqa: E402
     SummaryStoreFixtureAdapter,
     WorkflowTraceFixtureAdapter,
 )
-from silicon_boutique_mcp.models import HistoricalMetricsQuery  # noqa: E402
+from silicon_boutique_mcp.models import (  # noqa: E402
+    BenchmarkRunRequest,
+    HistoricalMetricsQuery,
+    RunIdentity,
+)
 from silicon_boutique_mcp.tools import (  # noqa: E402
     ToolContractError,
     get_benchmark_status,
     query_historical_metrics,
+    trigger_benchmark_run,
     tool_definitions_as_dicts,
 )
 
@@ -145,13 +150,60 @@ class ToolContractTest(unittest.TestCase):
             },
         ]
 
+    def benchmark_request(self, **overrides):
+        values = {
+            "cloud_provider": "gcp",
+            "project_id": "test-project",
+            "region": "us-central1",
+            "zone": "us-central1-a",
+            "machine_type": "c3-standard-4",
+            "node_count": 1,
+            "processor_family": "c3",
+            "architecture": "x86_64",
+            "concurrent_users": 10,
+            "users_per_second": 1,
+            "test_duration": "20m",
+            "pricing_model": "spot",
+        }
+        values.update(overrides)
+        return BenchmarkRunRequest(**values)
+
     def test_tool_registry_lists_p5_2_operations(self):
         tool_names = {tool["name"] for tool in tool_definitions_as_dicts()}
 
         self.assertEqual(
             tool_names,
-            {"get_benchmark_status", "query_historical_metrics"},
+            {
+                "trigger_benchmark_run",
+                "get_benchmark_status",
+                "query_historical_metrics",
+            },
         )
+
+    def test_trigger_benchmark_run_validates_and_delegates(self):
+        controller = RecordingRunController()
+
+        identity = trigger_benchmark_run(self.benchmark_request(), controller)
+
+        self.assertEqual(identity.run_id, "gha-123-1")
+        self.assertEqual(controller.requests[0].machine_type, "c3-standard-4")
+
+    def test_invalid_trigger_requests_fail_validation(self):
+        invalid_requests = [
+            self.benchmark_request(cloud_provider="aws"),
+            self.benchmark_request(project_id="   "),
+            self.benchmark_request(architecture="x86"),
+            self.benchmark_request(pricing_model="preemptible"),
+            self.benchmark_request(node_count=0),
+            self.benchmark_request(concurrent_users=False),
+            self.benchmark_request(users_per_second=-1),
+            self.benchmark_request(test_duration="0m"),
+            self.benchmark_request(test_duration="soon"),
+        ]
+        for request in invalid_requests:
+            with self.subTest(request=request):
+                with self.assertRaises(ToolContractError):
+                    trigger_benchmark_run(request, RecordingRunController())
 
     def test_status_lookup_returns_fixture_status_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -241,7 +293,11 @@ class ToolContractTest(unittest.TestCase):
             self.assertEqual(tools_result.returncode, 0, tools_result.stderr)
             self.assertEqual(
                 {tool["name"] for tool in json.loads(tools_result.stdout)},
-                {"get_benchmark_status", "query_historical_metrics"},
+                {
+                    "trigger_benchmark_run",
+                    "get_benchmark_status",
+                    "query_historical_metrics",
+                },
             )
 
             status_result = subprocess.run(
@@ -287,6 +343,61 @@ class ToolContractTest(unittest.TestCase):
             history_payload = json.loads(history_result.stdout)
             self.assertEqual(len(history_payload["results"]), 1)
             self.assertEqual(history_payload["results"][0]["run_id"], "run-a")
+
+    def test_cli_history_uses_bigquery_when_summary_store_is_omitted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_bq = Path(tmpdir) / "fake-bq.py"
+            rows = [self.summary_rows()[0]]
+            fake_bq.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json\n"
+                f"print(json.dumps({rows!r}))\n",
+                encoding="utf-8",
+            )
+            fake_bq.chmod(0o755)
+            env = {
+                **self.env(),
+                "SILICON_BOUTIQUE_BIGQUERY_PROJECT_ID": "example-project",
+                "SILICON_BOUTIQUE_BQ_COMMAND": str(fake_bq),
+            }
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "silicon_boutique_mcp",
+                    "history",
+                    "--machine-type",
+                    "c3-standard-4",
+                    "--limit",
+                    "1",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["results"][0]["run_id"], "run-a")
+
+
+class RecordingRunController:
+    def __init__(self):
+        self.requests = []
+
+    def trigger_benchmark_run(self, request):
+        self.requests.append(request)
+        return RunIdentity(
+            run_id="gha-123-1",
+            external_run_id="123",
+            external_run_url="https://github.example/runs/123",
+        )
+
+    def get_benchmark_status(self, run_id):
+        raise NotImplementedError
 
 
 if __name__ == "__main__":

@@ -533,63 +533,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          artifacts_dir = Path(os.environ["ARTIFACTS_DIR"])
-          trace_path = artifacts_dir / "workflow-trace.json"
-          trace = {
-              "github": {
-                  "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
-                  "run_id": os.environ.get("GITHUB_RUN_ID", ""),
-                  "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
-                  "ref": os.environ.get("GITHUB_REF", ""),
-                  "sha": os.environ.get("GITHUB_SHA", ""),
-              },
-              "benchmark": {
-                  "run_id": os.environ.get("RUN_ID", ""),
-                  "environment": os.environ.get("ENVIRONMENT", "gcp"),
-                  "cloud_provider": "gcp",
-                  "namespace": os.environ.get("NAMESPACE", ""),
-                  "machine_type": os.environ.get("MACHINE_TYPE", ""),
-                  "processor_family": os.environ.get("PROCESSOR_FAMILY", ""),
-                  "cpu_platform": os.environ.get("CPU_PLATFORM", "") or None,
-                  "architecture": os.environ.get("ARCHITECTURE", ""),
-                  "region": os.environ.get("REGION", ""),
-                  "zone": os.environ.get("ZONE", ""),
-                  "node_count": os.environ.get("NODE_COUNT", ""),
-                  "pricing_model": os.environ.get("PRICING_MODEL", ""),
-                  "benchmark_start": os.environ.get("BENCHMARK_START", ""),
-                  "benchmark_end": os.environ.get("BENCHMARK_END", ""),
-                  "load_concurrent_users": os.environ.get("CONCURRENT_USERS", ""),
-                  "load_users_per_second": os.environ.get("USERS_PER_SECOND", ""),
-                  "load_profile_source": os.environ.get("LOAD_PROFILE_SOURCE", "manual"),
-              },
-              "gcp": {
-                  "project_id": os.environ.get("PROJECT_ID", ""),
-                  "region": os.environ.get("REGION", ""),
-                  "zone": os.environ.get("ZONE", ""),
-              },
-              "artifacts": {
-                  "artifact_name": os.environ.get("SUMMARY_ARTIFACT_NAME", ""),
-                  "summary_path": str(artifacts_dir / "benchmark-summary.json"),
-                  "summary_store_path": str(artifacts_dir / "benchmark-summaries.ndjson"),
-                  "bigquery_load_report_path": str(artifacts_dir / "bigquery-load-report.json"),
-                  "trace_path": str(trace_path),
-              },
-              "teardown": {
-                  "destroy_attempted": "pending",
-                  "destroy_succeeded": "pending",
-              },
-              "inputs": {
-                  "failure_stage": os.environ.get("FAILURE_STAGE", ""),
-                  "acceptance_demo": os.environ.get("ACCEPTANCE_DEMO", ""),
-              },
-          }
-          trace_path.write_text(json.dumps(trace, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-          PY
+          python3 automation/scripts/write_workflow_trace.py \
+            --artifacts-dir "$ARTIFACTS_DIR"
 
           python3 automation/scripts/run_acceptance_demo.py \
             --mode verify \
@@ -599,25 +544,8 @@ jobs:
             --cloud-provider gcp \
             --require-bigquery
 
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          from pathlib import Path
-
-          report = json.loads(Path("artifacts/acceptance-demo-report.json").read_text(encoding="utf-8"))
-          dashboard = report["checks"]["dashboard"]
-          bigquery = report["checks"]["bigquery"]
-          print("### Acceptance Demo")
-          print()
-          print("| Field | Value |")
-          print("| --- | --- |")
-          print(f"| status | `{report['status']}` |")
-          print(f"| run_id | `{report['run_id']}` |")
-          print(f"| artifact | `{report['artifacts_dir']}` |")
-          print(f"| bigquery_summary_table | `{bigquery.get('summary_table', '')}` |")
-          print(f"| dashboard_uid | `{dashboard.get('dashboard_uid', '')}` |")
-          print(f"| dashboard_title | `{dashboard.get('dashboard_title', '')}` |")
-          print("| dashboard_location | `service/sb-monitoring-grafana, dashboard uid silicon-boutique-online-boutique` |")
-          PY
+          python3 automation/scripts/render_acceptance_summary.py \
+            --report "$ARTIFACTS_DIR/acceptance-demo-report.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Capture teardown precheck
         if: always()
@@ -833,82 +761,8 @@ jobs:
           export TRACE_BIGQUERY_SUMMARY_TABLE="$bigquery_summary_table"
           export TRACE_ACCEPTANCE_REPORT_PATH="$acceptance_report_path"
 
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          artifacts_dir = Path(os.environ["ARTIFACTS_DIR"])
-          summary_path = artifacts_dir / "benchmark-summary.json"
-          summary_store_path = artifacts_dir / "benchmark-summaries.ndjson"
-          loadgenerator_stats_path = artifacts_dir / "loadgenerator-stats.json"
-          bigquery_load_report_path = artifacts_dir / "bigquery-load-report.json"
-          acceptance_report_path = artifacts_dir / "acceptance-demo-report.json"
-          trace_path = artifacts_dir / "workflow-trace.json"
-          trace = {
-              "github": {
-                  "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
-                  "run_id": os.environ.get("GITHUB_RUN_ID", ""),
-                  "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
-                  "ref": os.environ.get("GITHUB_REF", ""),
-                  "sha": os.environ.get("GITHUB_SHA", ""),
-              },
-              "benchmark": {
-                  "run_id": os.environ.get("RUN_ID", ""),
-                  "environment": os.environ.get("TRACE_ENVIRONMENT", ""),
-                  "cloud_provider": os.environ.get("TRACE_CLOUD_PROVIDER", ""),
-                  "namespace": os.environ.get("NAMESPACE", ""),
-                  "machine_type": os.environ.get("MACHINE_TYPE", ""),
-                  "processor_family": os.environ.get("PROCESSOR_FAMILY", ""),
-                  "cpu_platform": os.environ.get("CPU_PLATFORM", "") or None,
-                  "architecture": os.environ.get("ARCHITECTURE", ""),
-                  "region": os.environ.get("REGION", ""),
-                  "zone": os.environ.get("ZONE", ""),
-                  "node_count": os.environ.get("NODE_COUNT", ""),
-                  "pricing_model": os.environ.get("PRICING_MODEL", ""),
-                  "benchmark_start": os.environ.get("TRACE_BENCHMARK_START", ""),
-                  "benchmark_end": os.environ.get("TRACE_BENCHMARK_END", ""),
-                  "load_concurrent_users": os.environ.get("CONCURRENT_USERS", ""),
-                  "load_users_per_second": os.environ.get("USERS_PER_SECOND", ""),
-                  "load_profile_source": os.environ.get("LOAD_PROFILE_SOURCE", "manual"),
-              },
-              "gcp": {
-                  "project_id": os.environ.get("PROJECT_ID", ""),
-                  "region": os.environ.get("REGION", ""),
-                  "zone": os.environ.get("ZONE", ""),
-              },
-              "bigquery": {
-                  "dataset": os.environ.get("BIGQUERY_DATASET", ""),
-                  "table": os.environ.get("BIGQUERY_TABLE", ""),
-                  "location": os.environ.get("BIGQUERY_LOCATION", ""),
-                  "summary_table": os.environ.get("TRACE_BIGQUERY_SUMMARY_TABLE", ""),
-                  "load_report_path": os.environ.get("TRACE_BIGQUERY_LOAD_REPORT_PATH", ""),
-                  "load_report_exists": str(bigquery_load_report_path.exists()).lower(),
-              },
-              "artifacts": {
-                  "artifact_name": os.environ.get("SUMMARY_ARTIFACT_NAME", ""),
-                  "summary_path": str(summary_path),
-                  "summary_store_path": str(summary_store_path),
-                  "loadgenerator_stats_path": str(loadgenerator_stats_path),
-                  "bigquery_load_report_path": str(bigquery_load_report_path),
-                  "acceptance_report_path": str(acceptance_report_path),
-                  "trace_path": str(trace_path),
-                  "summary_exists": str(summary_path.exists()).lower(),
-                  "summary_store_exists": str(summary_store_path.exists()).lower(),
-                  "loadgenerator_stats_exists": str(loadgenerator_stats_path.exists()).lower(),
-                  "bigquery_load_report_exists": str(bigquery_load_report_path.exists()).lower(),
-                  "acceptance_report_exists": str(acceptance_report_path.exists()).lower(),
-              },
-              "teardown": {
-                  "destroy_attempted": os.environ.get("TRACE_DESTROY_ATTEMPTED", ""),
-                  "destroy_succeeded": os.environ.get("TRACE_DESTROY_SUCCEEDED", ""),
-              },
-              "inputs": {
-                  "failure_stage": os.environ.get("FAILURE_STAGE", ""),
-              },
-          }
-          trace_path.write_text(json.dumps(trace, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-          PY
+          python3 automation/scripts/write_workflow_trace.py \
+            --artifacts-dir "$ARTIFACTS_DIR"
 
           {
             echo "run_id=${RUN_ID:-}"

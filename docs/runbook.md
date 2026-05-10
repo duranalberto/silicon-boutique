@@ -378,13 +378,13 @@ python3 automation/scripts/validate_benchmark_comparability.py \
   --strict
 ```
 
-Before using accumulated rows for cross-machine comparisons, rerun the same validator without `--run-id` and with `--mode comparability`; that mode validates the historical store and requires at least two comparable rows. For local-only Phase 8 acceptance, prefer the split-evidence helper because `artifacts/benchmark-summaries.ndjson` can contain legacy, smoke, or demo rows:
+Before using accumulated rows for cross-machine comparisons, rerun the same validator without `--run-id` and with `--mode comparability`; that mode validates the historical store and requires at least two comparable rows. For local comparison acceptance without cloud credentials, prefer the split-evidence helper because `artifacts/benchmark-summaries.ndjson` can contain legacy, smoke, or demo rows:
 
 ```bash
-python3 automation/scripts/validate_phase8_local.py
+python3 automation/scripts/validate_local_comparison.py
 ```
 
-The helper writes valid-only comparability evidence and mixed comparison-report evidence under `artifacts/phase8-local-validation/`. Treat `pass` on the valid-only `comparability-report.json` as the quality gate, `warn` on the mixed `comparison-report.json` as expected when rejected-row evidence is present, and `fail` as a blocked comparison with no usable groups or schema drift.
+The helper writes valid-only comparability evidence and mixed comparison-report evidence under `artifacts/local-comparison-validation/`. Treat `pass` on the valid-only `comparability-report.json` as the quality gate, `warn` on the mixed `comparison-report.json` as expected when rejected-row evidence is present, and `fail` as a blocked comparison with no usable groups or schema drift.
 
 Generate a historical comparison report from local NDJSON rows when you want ranked CPU, memory, latency, throughput, cost, and quality tables without opening a spreadsheet:
 
@@ -448,6 +448,45 @@ The AWS root exports the same run metadata used by the GCP workflow, including `
 The Phase 4 workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch` so future MCP tooling can trigger the same orchestration boundary through the GitHub Actions API.
 
 `.github/workflows/benchmark-aws.yml` is scaffold-only. It runs Terraform static validation for `infra/terraform/aws-eks` and records the intended AWS metadata, but it does not authenticate to AWS, apply resources, deploy Helm charts, run benchmarks, or load BigQuery rows.
+
+P9.1 through P9.3 add production MCP adapters for dispatching the GCP benchmark workflow, querying live GitHub Actions run state, and reading durable BigQuery benchmark history. Configure the MCP process with:
+
+- `SILICON_BOUTIQUE_GITHUB_TOKEN`, falling back to `GITHUB_TOKEN`
+- `SILICON_BOUTIQUE_GITHUB_REPOSITORY`, falling back to `GITHUB_REPOSITORY`, in `owner/repo` format
+- `SILICON_BOUTIQUE_GITHUB_REF`, defaulting to `main`
+- `SILICON_BOUTIQUE_GITHUB_WORKFLOW_ID`, defaulting to `benchmark.yml`
+- `SILICON_BOUTIQUE_BIGQUERY_PROJECT_ID`, falling back to `GOOGLE_CLOUD_PROJECT`
+- Optional `SILICON_BOUTIQUE_BIGQUERY_DATASET`, `SILICON_BOUTIQUE_BIGQUERY_TABLE`, and `SILICON_BOUTIQUE_BIGQUERY_LOCATION`
+
+The GitHub token needs Actions write permission to create workflow dispatch events and Actions read permission for fallback workflow-run lookup and status checks. The trigger adapter sends safe production inputs only: `failure_stage=none`, `load_profile_source=manual`, and `acceptance_demo=false`. It returns `RunIdentity.run_id` as `gha-<github-run-id>-1`, matching the workflow's derived `RUN_ID` convention for the first run attempt, plus the external GitHub run ID and URL when available.
+
+For guarded manual validation from the MCP package:
+
+```bash
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp trigger \
+  --request-json request.json
+```
+
+Query live status with the returned benchmark run ID:
+
+```bash
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp status \
+  --run-id gha-123456789-1
+```
+
+Fixture-backed status remains available by adding `--trace-fixture artifacts/workflow-trace.json`. Live status maps GitHub `queued`, `requested`, `waiting`, and `pending` to `queued`; `in_progress` to `running`; completed successful runs to `completed`; completed non-success conclusions such as `failure`, `cancelled`, `timed_out`, and `skipped` to `failed`; missing or unrecognized states to `unknown`. P9.2 reports workflow state only and does not download artifacts or infer teardown success from `workflow-trace.json`.
+
+Query durable history through BigQuery with the same filters as the fixture-backed command:
+
+```bash
+PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp history \
+  --machine-type c3-standard-4 \
+  --processor-family c3 \
+  --architecture x86_64 \
+  --limit 10
+```
+
+The MCP history adapter is read-only, uses the `bq` CLI with Standard SQL, and returns rows from the configured benchmark summary table. Local NDJSON history remains available by adding `--summary-store artifacts/benchmark-summaries.ndjson`.
 
 Before dispatching the workflow, configure GitHub OIDC for GCP and provide these repository or environment secrets:
 
@@ -545,7 +584,7 @@ Normal GitHub workflow cancellation should still allow `if: always()` cleanup to
 
 ## MCP Boundary Validation
 
-The Phase 5 MCP boundary package lives in `mcp-server/`. It is intentionally dependency-light and exposes fixture-testable contracts without implementing the P8 production GitHub Actions dispatch adapter, BigQuery history adapter, or real MCP SDK transport.
+The MCP boundary package lives in `mcp-server/`. It exposes the production GitHub Actions and BigQuery adapters through the CLI and a real stdio MCP SDK server, while preserving fixture-backed local validation.
 
 Validate the package entry point, tool contracts, and boundary isolation with:
 
@@ -567,6 +606,23 @@ PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp history \
   --machine-type "$machine_type" \
   --limit 10
 ```
+
+After installing the package dependencies, start the stdio MCP server for local agents:
+
+```bash
+silicon-boutique-mcp-stdio
+```
+
+Use fixture mode when validating the MCP transport without live GitHub or BigQuery access:
+
+```bash
+export SILICON_BOUTIQUE_MCP_ADAPTER_MODE=fixture
+export SILICON_BOUTIQUE_TRACE_FIXTURE=artifacts/workflow-trace.json
+export SILICON_BOUTIQUE_SUMMARY_STORE=artifacts/benchmark-summaries.ndjson
+silicon-boutique-mcp-stdio
+```
+
+Fixture mode supports status and history calls. Benchmark triggering remains production-adapter only.
 
 ## GCP Terraform Validation
 

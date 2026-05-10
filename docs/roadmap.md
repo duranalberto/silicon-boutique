@@ -244,6 +244,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 ## Phase 9: Production MCP Integration
 
 ### P9.1 - Implement `trigger_benchmark_run`
+- Status: Implemented; the MCP boundary now validates `BenchmarkRunRequest`, dispatches the GCP benchmark workflow through a stdlib GitHub Actions adapter, and returns the derived `gha-<github-run-id>-1` run identity with external GitHub run metadata.
 - Description: Add the production adapter that validates a `BenchmarkRunRequest`, dispatches `.github/workflows/benchmark.yml` through the GitHub Actions API, and returns a stable external run identity.
 - Why it matters: The spec lists benchmark triggering as a required MCP tool, but the implemented boundary is still fixture-backed.
 - How to test: Exercise the adapter against a mocked GitHub API and, in a guarded integration test, dispatch a branch workflow with safe inputs and verify the returned identity maps to the workflow run.
@@ -251,6 +252,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 - Dependencies: `P4.3`, `P5.1`, `P6.5`, `P7.6`.
 
 ### P9.2 - Back status queries with GitHub Actions run state
+- Status: Implemented; the MCP GitHub Actions adapter now resolves canonical benchmark run IDs to workflow runs, maps live GitHub run state to boundary status values, and returns non-secret trace metadata while preserving fixture-backed local status checks.
 - Description: Replace fixture-only status lookup with an adapter that maps GitHub Actions run and job state to `queued`, `running`, `completed`, `failed`, or `unknown`.
 - Why it matters: Real agents need live status for dispatched benchmark runs.
 - How to test: Mock GitHub workflow-run responses for queued, in-progress, success, failure, cancelled, and missing runs; verify trace fields stay non-secret.
@@ -258,6 +260,7 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 - Dependencies: `P9.1`.
 
 ### P9.3 - Back historical queries with BigQuery
+- Status: Implemented; the MCP boundary now uses a stdlib `bq`-backed BigQuery history adapter for production `query_historical_metrics` calls while preserving NDJSON fixture-backed history queries.
 - Description: Implement the production history store adapter using parameterized BigQuery SQL over the benchmark summary table.
 - Why it matters: Agent and API consumers need durable history for processor comparison queries.
 - How to test: Run adapter tests against mocked BigQuery results and an integration test against a test dataset populated by P7.2 fixtures.
@@ -265,38 +268,85 @@ Phase 0 through Phase 6 are treated as implemented baseline work. Phase 7 is now
 - Dependencies: `P7.2`, `P5.2`.
 
 ### P9.4 - Add a real MCP SDK server entrypoint
+- Status: Implemented; the MCP package now includes a FastMCP stdio server entrypoint that registers the production trigger, status, and history tools while retaining fixture-mode validation for local status and history calls.
 - Description: Add the MCP SDK transport and tool registration layer around the existing dependency-light service core.
 - Why it matters: The boundary package exposes contracts and a CLI, but it is not yet an MCP server that agents can connect to directly.
 - How to test: Start the server locally, list tools through an MCP client, call each tool with fixture and mocked production adapters, and verify JSON schemas match the existing contracts.
 - Edge cases: Secret configuration, adapter selection, tool errors, long-running dispatch calls, and keeping Terraform/Helm internals out of the MCP process.
 - Dependencies: `P9.1`, `P9.2`, `P9.3`.
 
-## Phase 10: Infrastructure and Operations Hardening
+## Phase 10: Behavior-Preserving Code Refactor
 
-### P10.1 - Add remote Terraform state and run locking for GCP
-- Description: Configure a production-safe Terraform backend and locking strategy for GCP benchmark runs while preserving bounded static validation for pull requests.
-- Why it matters: The GitHub workflow currently relies on same-job local Terraform state. That supports cleanup within one job, but it limits recovery after runner loss and makes force-cancel cleanup harder.
-- How to test: Run static validation without backend credentials, then run a guarded cloud plan/apply/destroy with remote state and confirm cleanup can resume from a fresh runner.
-- Edge cases: State bucket permissions, state leakage, concurrent workflow runs, partial applies, and emergency cleanup after job cancellation.
-- Dependencies: `P4.2`, `P6.1`, `P7.6`.
+Phase 10 is refactor-only. It keeps benchmark behavior, schemas, Terraform resources, Helm output, artifact contracts, and MCP contracts stable while reducing phase-coupled naming and repeated helper code.
 
-### P10.2 - Add run-scoped orphan detection
-- Description: Add a bounded audit script that lists GCP and Kubernetes resources matching a `run_id` and reports anything that survived teardown.
-- Why it matters: The workflow captures pre/post checks, but there is no reusable orphan detector for failed, cancelled, or force-cancelled runs.
-- How to test: Run the detector against empty state, fixture outputs, and a controlled failed teardown; verify it refuses to inspect or delete resources without a run scope.
-- Edge cases: Label propagation gaps, resources without labels, shared resources, API pagination, and missing cloud credentials.
-- Dependencies: `P1.3`, `P4.2`, `P10.1`.
+### P10.1 - Rename phase-coupled local comparison validation
+- Status: Implemented; the local comparison helper, tests, fixture IDs, report names, and documentation now use general comparison terminology instead of phase-coupled naming.
+- Description: Cleanly rename the local comparison validation command and tests without a compatibility shim.
+- Why it matters: Validation helpers should describe reusable behavior, not the implementation phase that introduced them.
+- How to test: Run `python3 -m unittest discover -s automation/tests` and verify no old phase-coupled helper names remain outside historical roadmap entries.
+- Edge cases: Preserve exit codes, fixture fallback behavior, report content, and no-cloud-command guarantees.
+- Dependencies: None.
 
-### P10.3 - Add CI validation for Terraform, Helm, Python, and docs
-- Description: Add a pull-request validation workflow that runs bounded Terraform validation, Helm lint/template checks, Python unit tests, schema checks, and documentation link checks.
-- Why it matters: Current validation is mostly manual. The repo already has tests and lintable charts, but regressions can land without a CI gate.
-- How to test: Open a branch with a known failing fixture, chart render issue, or Terraform format drift and confirm CI blocks it with a clear failure.
-- Edge cases: Network-bound Helm dependency updates, Terraform provider downloads, hidden-file docs, Python path setup for `mcp-server`, and PRs without GCP credentials.
-- Dependencies: `P6.2`, `P6.3`, `P7.1`.
+### P10.2 - Create shared automation utilities
+- Status: Implemented; shared stdlib helpers now live in the MCP source package and cover JSON/NDJSON I/O, command results, shell/log helpers, duration/timestamp utilities, and BigQuery CLI safety helpers.
+- Description: Consolidate repeated helper code used by automation scripts and MCP adapters.
+- Why it matters: Shared utilities make future changes to command execution, file writing, and BigQuery validation easier to audit.
+- How to test: Run `python3 -m unittest automation.tests.test_shared_utilities` plus the full automation and MCP suites.
+- Edge cases: Keep CLI-facing error messages stable where scripts translate shared helper errors into domain-specific exceptions.
+- Dependencies: `P10.1`.
 
-### P10.4 - Version and migrate benchmark schemas
-- Description: Add explicit schema versioning for Prometheus metrics, benchmark summaries, workflow traces, dashboard contracts, and MCP result models, plus a migration policy for BigQuery table evolution.
-- Why it matters: Durable BigQuery history, dashboards, and MCP adapters need controlled evolution as metrics and comparison fields change.
-- How to test: Validate old and new fixture rows, run a migration fixture, and confirm historical queries can filter or transform by schema version.
-- Edge cases: Backfilled runs, partial summaries, deleted fields, renamed fields, dashboard panels pinned to old fields, and MCP clients pinned to older output contracts.
-- Dependencies: `P7.2`, `P9.3`.
+### P10.3 - Split local benchmark orchestration boundaries
+- Status: Implemented; `LocalBenchmark` now exposes an `execute()` workflow interface with a post-extraction hook, so callers no longer need to drive each lifecycle method manually.
+- Description: Separate the public workflow boundary from provisioning, deployment, extraction, cleanup, and trace-writing internals.
+- Why it matters: The local runner remains behavior-compatible while becoming safer for other automation to compose.
+- How to test: Run `python3 -m unittest automation.tests.test_run_local_benchmark`.
+- Edge cases: Teardown must still run after partial failures, controlled failure stages must preserve behavior, and `--skip-destroy` must remain explicit.
+- Dependencies: `P10.2`.
+
+### P10.4 - Decouple acceptance demo from local benchmark internals
+- Status: Implemented; the acceptance demo uses the public local workflow interface and captures dashboard, BigQuery, and hold evidence through the post-extraction hook.
+- Description: Stop manually invoking internal local benchmark lifecycle methods from acceptance automation.
+- Why it matters: Acceptance verification can evolve without duplicating orchestration order.
+- How to test: Run `python3 -m unittest automation.tests.test_run_acceptance_demo`.
+- Edge cases: Preserve optional BigQuery behavior, dashboard hold behavior, cleanup behavior, and `verify` mode semantics.
+- Dependencies: `P10.3`.
+
+### P10.5 - Consolidate BigQuery and comparison helpers
+- Status: Implemented; BigQuery validation, SQL escaping, command result shape, `bq` execution, and JSON row parsing are shared by loader, validation, comparison, and MCP history paths.
+- Description: Move duplicated BigQuery helper logic behind one stdlib module while keeping domain-specific exceptions at script boundaries.
+- Why it matters: Query safety and destination validation should not drift across automation and MCP code.
+- How to test: Run BigQuery loader, validation, comparison, and MCP history unit tests.
+- Edge cases: Preserve generated command shape, duplicate-run policy, mocked `bq` responses, and MCP response contracts.
+- Dependencies: `P10.2`.
+
+### P10.6 - Unify test naming, fixtures, and imports
+- Status: Implemented; phase-specific test names were removed, importable modules replaced path-loaded tests for the local comparison helper, and shared utility tests cover common fixtures.
+- Description: Generalize test names and reduce special-case import logic.
+- Why it matters: Tests should stay readable as behavior moves between phases.
+- How to test: Run the full automation, MCP, and k8s unit suites.
+- Edge cases: Keep all tests stdlib-compatible.
+- Dependencies: `P10.1`, `P10.2`.
+
+### P10.7 - Refactor chart test helpers
+- Status: Implemented; chart rendering and line-oriented YAML inspection helpers are shared across k8s tests, with an added post-renderer regression for existing env vars and sidecar preservation.
+- Description: Reuse test helper code without changing the stdlib-only Helm post-renderer behavior.
+- Why it matters: The post-renderer is safety-sensitive and should have focused tests around fragile YAML mutations.
+- How to test: Run `python3 -m unittest discover -s k8s/tests`.
+- Edge cases: Preserve rendered labels, annotations, load-generator env vars, and Helm plugin behavior.
+- Dependencies: `P10.6`.
+
+### P10.8 - Reduce workflow inline code duplication
+- Status: Implemented; workflow trace writing and acceptance summary rendering now live in reusable Python scripts with unit tests.
+- Description: Replace duplicated inline Python blocks in `.github/workflows/benchmark.yml`.
+- Why it matters: Workflow artifact contracts are easier to test when Python lives in versioned scripts.
+- How to test: Run `python3 -m unittest automation.tests.test_workflow_trace_helpers` and inspect `.github/workflows/benchmark.yml` for remaining inline Python blocks.
+- Edge cases: Preserve GitHub output names, artifact names, teardown status handling, and acceptance-demo evidence.
+- Dependencies: `P10.3`, `P10.4`.
+
+### P10.9 - Dead-code and stale-reference cleanup gate
+- Status: Implemented; phase-coupled validation references were removed from active code/docs, stale phase-flow wording was updated, and duplicate helper hotspots were reduced behind shared modules.
+- Description: Run targeted cleanup for stale phase references, old future wording, and redundant helper definitions.
+- Why it matters: Refactor work should leave the repository easier to navigate.
+- How to test: Run targeted `rg` searches for phase-coupled names and duplicate helpers, then run the full documented validation commands.
+- Edge cases: Keep legitimate historical roadmap entries and intentionally scaffolded AWS warnings.
+- Dependencies: `P10.1` through `P10.8`.

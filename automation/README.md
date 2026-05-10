@@ -173,20 +173,20 @@ Use `--dry-run` with the same arguments to validate local input, table access, s
 
 ## Summary and Comparability Validation
 
-For local-only Phase 8 validation, use the dedicated helper instead of pointing
+For local comparison validation without cloud credentials, use the dedicated helper instead of pointing
 the historical gate directly at `artifacts/benchmark-summaries.ndjson`. Local
-history can contain pre-P8.1, smoke, or demo rows, so the helper writes split
-evidence under `artifacts/phase8-local-validation/`: a valid-only store whose
+history can contain pre-comparison-ready, smoke, or demo rows, so the helper writes split
+evidence under `artifacts/local-comparison-validation/`: a valid-only store whose
 comparability report must pass, and a mixed store whose comparison report should
 warn while listing the intentional rejected partial row.
 
 ```bash
-python3 automation/scripts/validate_phase8_local.py
+python3 automation/scripts/validate_local_comparison.py
 ```
 
 Expected statuses are `pass` for
-`artifacts/phase8-local-validation/comparability-report.json`, `warn` for
-`artifacts/phase8-local-validation/comparison-report.json` when rejected-row
+`artifacts/local-comparison-validation/comparability-report.json`, `warn` for
+`artifacts/local-comparison-validation/comparison-report.json` when rejected-row
 evidence is present, and `fail` only when no comparable groups are available or
 schema drift blocks comparison.
 

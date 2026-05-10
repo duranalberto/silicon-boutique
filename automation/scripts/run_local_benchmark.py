@@ -12,24 +12,35 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import (
+    CommandResult,
+    append_log,
+    append_text,
+    bool_string,
+    shell_join,
+    shell_quote,
+    summarize_command_failure,
+    utc_now,
+    utc_offset,
+    write_env_file,
+    write_json,
+)
+
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 
 class LocalBenchmarkError(RuntimeError):
     """Raised when the local benchmark flow fails."""
-
-
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
 
 
 @dataclass
@@ -72,6 +83,12 @@ class BenchmarkConfig:
     @property
     def summary_artifact_name(self) -> str:
         return f"benchmark-local-{self.run_id}"
+
+
+@dataclass(frozen=True)
+class BenchmarkWorkflowResult:
+    primary_error: Exception | None
+    teardown_error: Exception | None
 
 
 class CommandRunner:
@@ -126,6 +143,16 @@ class LocalBenchmark:
         self.primary_error: Exception | None = None
 
     def run(self) -> int:
+        result = self.execute()
+        if result.teardown_error:
+            print(str(result.teardown_error), file=sys.stderr)
+            return 2
+        if result.primary_error:
+            print(str(result.primary_error), file=sys.stderr)
+            return 2
+        return 0
+
+    def execute(self, after_extract=None) -> BenchmarkWorkflowResult:
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.provision()
@@ -138,19 +165,14 @@ class LocalBenchmark:
             self.update_monitoring_benchmark_window()
             self.fail_if_requested("before_extract")
             self.extract_and_summarize()
+            if after_extract is not None:
+                after_extract(self)
         except Exception as exc:
             self.primary_error = exc
         finally:
             teardown_error = self.cleanup()
             self.write_trace()
-
-        if teardown_error:
-            print(str(teardown_error), file=sys.stderr)
-            return 2
-        if self.primary_error:
-            print(str(self.primary_error), file=sys.stderr)
-            return 2
-        return 0
+        return BenchmarkWorkflowResult(self.primary_error, teardown_error)
 
     def provision(self) -> None:
         self.validate_kubernetes_context()
@@ -1051,79 +1073,6 @@ def output_value(outputs: dict[str, Any], name: str, default: Any) -> Any:
     if isinstance(value, dict) and "value" in value:
         return value["value"]
     return default
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def write_env_file(path: Path, values: dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(f"{key}={value}\n" for key, value in values.items()),
-        encoding="utf-8",
-    )
-
-
-def append_log(
-    path: Path, command: Iterable[str], stdout: str, stderr: str, returncode: int
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"$ {shell_join(command)}\n")
-        if stdout:
-            handle.write(stdout)
-            if not stdout.endswith("\n"):
-                handle.write("\n")
-        if stderr:
-            handle.write(stderr)
-            if not stderr.endswith("\n"):
-                handle.write("\n")
-        handle.write(f"exit_code={returncode}\n\n")
-
-
-def append_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(text)
-
-
-def summarize_command_failure(result: CommandResult) -> str:
-    output = (result.stderr or result.stdout).strip()
-    if not output:
-        return ""
-    output = re.sub(r"\s+", " ", output)
-    if len(output) > 500:
-        return output[:497] + "..."
-    return output
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def utc_offset(*, seconds: int) -> str:
-    return (
-        (datetime.now(timezone.utc) + timedelta(seconds=seconds))
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-
-
-def bool_string(value: bool) -> str:
-    return "true" if value else "false"
-
-
-def shell_join(command: Iterable[str]) -> str:
-    return " ".join(shell_quote(part) for part in command)
-
-
-def shell_quote(value: str) -> str:
-    if re.fullmatch(r"[A-Za-z0-9_@%+=:,./-]+", value):
-        return value
-    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 def main(argv: list[str] | None = None) -> int:

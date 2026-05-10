@@ -5,32 +5,27 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
-IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
-LOCATION_RE = re.compile(r"^[A-Za-z0-9-]+$")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared import bigquery as bq_helpers
+from silicon_boutique_shared.automation import write_json
 
 
 class BigQueryLoadError(RuntimeError):
     """Raised when a benchmark summary cannot be loaded safely."""
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-Runner = Callable[[list[str]], CommandResult]
+CommandResult = bq_helpers.CommandResult
+Runner = bq_helpers.Runner
 
 
 def parse_args() -> argparse.Namespace:
@@ -195,13 +190,10 @@ def load_bigquery_schema(path: Path) -> list[dict[str, Any]]:
 def validate_destination(
     project_id: str, dataset_id: str, table_id: str, location: str
 ) -> None:
-    if not PROJECT_RE.match(project_id):
-        raise BigQueryLoadError(f"invalid GCP project_id: {project_id}")
-    for label, value in (("dataset_id", dataset_id), ("table_id", table_id)):
-        if not IDENTIFIER_RE.match(value):
-            raise BigQueryLoadError(f"invalid BigQuery {label}: {value}")
-    if not LOCATION_RE.match(location):
-        raise BigQueryLoadError(f"invalid BigQuery location: {location}")
+    try:
+        bq_helpers.validate_destination(project_id, dataset_id, table_id, location)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryLoadError(str(exc)) from exc
 
 
 def validate_table_schema(
@@ -273,15 +265,13 @@ def existing_run_ids(
             "failed to query existing BigQuery run IDs: " + result.stderr.strip()
         )
     try:
-        rows = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise BigQueryLoadError("bq query did not return valid JSON") from exc
-    if not isinstance(rows, list):
-        raise BigQueryLoadError("bq query did not return a row array")
+        rows = bq_helpers.parse_bq_json_array(result.stdout)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryLoadError(str(exc)) from exc
     return {
         row["run_id"]
         for row in rows
-        if isinstance(row, dict) and isinstance(row.get("run_id"), str)
+        if isinstance(row.get("run_id"), str)
     }
 
 
@@ -329,34 +319,22 @@ def schema_signature(fields: list[dict[str, Any]]) -> list[tuple[str, str, str]]
 
 
 def table_ref(project_id: str, dataset_id: str, table_id: str) -> str:
-    return f"{project_id}:{dataset_id}.{table_id}"
+    return bq_helpers.table_ref(project_id, dataset_id, table_id)
 
 
 def table_sql_name(project_id: str, dataset_id: str, table_id: str) -> str:
-    return f"{project_id}.{dataset_id}.{table_id}"
+    return bq_helpers.table_sql_name(project_id, dataset_id, table_id)
 
 
 def sql_string(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    return bq_helpers.sql_string(value)
 
 
 def run_bq(command: list[str]) -> CommandResult:
     try:
-        result = subprocess.run(
-            command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError as exc:
-        raise BigQueryLoadError("bq command was not found in PATH") from exc
-    return CommandResult(result.returncode, result.stdout, result.stderr)
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return bq_helpers.run_bq(command)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryLoadError(str(exc)) from exc
 
 
 if __name__ == "__main__":

@@ -123,15 +123,15 @@ Key files:
 
 Use `benchmark-summary.json` for the fastest view of a single run. The local benchmark validates only the current `run_id` in `benchmark-summaries.ndjson`; use the full NDJSON history when validating historical comparisons, generating comparison reports, or loading BigQuery rows.
 
-For the full local-only Phase 8 validation, prefer the split-evidence helper:
+For full local comparison validation without cloud credentials, prefer the split-evidence helper:
 
 ```bash
-python3 automation/scripts/validate_phase8_local.py
+python3 automation/scripts/validate_local_comparison.py
 ```
 
 The helper does not use GCP, AWS, BigQuery, or GitHub Actions. It runs the local
 unit and Terraform static checks, then writes deterministic comparison evidence
-under `artifacts/phase8-local-validation/`. The valid-only
+under `artifacts/local-comparison-validation/`. The valid-only
 `comparability-report.json` should be `pass`; the mixed `comparison-report.json`
 and `.md` should be `warn` when they include comparable ranked groups plus an
 intentional rejected partial row. The default `artifacts/benchmark-summaries.ndjson`

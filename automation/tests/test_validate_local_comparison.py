@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import sys
 import tempfile
@@ -7,14 +6,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "automation" / "scripts" / "validate_phase8_local.py"
+SCRIPTS_DIR = REPO_ROOT / "automation" / "scripts"
 SCHEMA = REPO_ROOT / "automation" / "templates" / "benchmark-summary.schema.json"
 
-sys.path.insert(0, str(SCRIPT.parent))
-spec = importlib.util.spec_from_file_location("validate_phase8_local", SCRIPT)
-validate_phase8_local = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = validate_phase8_local
-spec.loader.exec_module(validate_phase8_local)
+sys.path.insert(0, str(SCRIPTS_DIR))
+import validate_local_comparison
 
 
 class FakeRunner:
@@ -24,15 +20,15 @@ class FakeRunner:
     def __call__(self, command, cwd):
         rendered = [str(part) for part in command]
         self.commands.append({"command": rendered, "cwd": str(cwd)})
-        return validate_phase8_local.CommandResult(0, "", "")
+        return validate_local_comparison.CommandResult(0, "", "")
 
 
-class ValidatePhase8LocalTest(unittest.TestCase):
+class ValidateLocalComparisonTest(unittest.TestCase):
     def test_uses_existing_store_when_two_comparable_rows_exist(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             summary_store = base / "benchmark-summaries.ndjson"
-            write_ndjson(summary_store, validate_phase8_local.comparable_fixture_rows()[:2])
+            write_ndjson(summary_store, validate_local_comparison.comparable_fixture_rows()[:2])
             runner = FakeRunner()
 
             result = run_validation(base, summary_store, runner)
@@ -41,9 +37,9 @@ class ValidatePhase8LocalTest(unittest.TestCase):
             self.assertEqual(result["summary_source"], "existing")
             self.assertEqual(result["comparability_status"], "pass")
             self.assertEqual(result["comparison_status"], "warn")
-            self.assertEqual(result["comparable_run_ids"], ["phase8-local-fast-001", "phase8-local-fast-002"])
-            valid_rows = read_ndjson(base / "phase8" / "benchmark-summaries-valid.ndjson")
-            mixed_rows = read_ndjson(base / "phase8" / "benchmark-summaries-mixed.ndjson")
+            self.assertEqual(result["comparable_run_ids"], ["local-comparison-fast-001", "local-comparison-fast-002"])
+            valid_rows = read_ndjson(base / "comparison" / "benchmark-summaries-valid.ndjson")
+            mixed_rows = read_ndjson(base / "comparison" / "benchmark-summaries-mixed.ndjson")
             self.assertEqual(len(valid_rows), 2)
             self.assertEqual(len(mixed_rows), 3)
             self.assertNoCloudCommands(runner.commands)
@@ -59,17 +55,17 @@ class ValidatePhase8LocalTest(unittest.TestCase):
 
             self.assertEqual(result["status"], "pass")
             self.assertEqual(result["summary_source"], "fixture")
-            self.assertIn("found 0 comparable P8.1 rows", result["summary_source_reason"])
+            self.assertIn("found 0 comparable comparison-ready rows", result["summary_source_reason"])
             self.assertEqual(result["comparability_status"], "pass")
-            comparison = read_json(base / "phase8" / "comparison-report.json")
+            comparison = read_json(base / "comparison" / "comparison-report.json")
             self.assertEqual(comparison["status"], "warn")
             self.assertEqual(comparison["comparison_group_count"], 2)
-            self.assertEqual(comparison["rejected_runs"][0]["run_id"], "phase8-local-partial-001")
+            self.assertEqual(comparison["rejected_runs"][0]["run_id"], "local-comparison-partial-001")
             self.assertIn(
                 "summary_status_not_complete",
                 comparison["rejected_runs"][0]["reasons"],
             )
-            self.assertTrue((base / "phase8-existing-comparability-check.json").exists())
+            self.assertTrue((base / "local-existing-comparability-check.json").exists())
             self.assertNoCloudCommands(runner.commands)
 
     def test_outputs_passing_comparability_and_deterministic_rankings(self):
@@ -81,9 +77,9 @@ class ValidatePhase8LocalTest(unittest.TestCase):
             result = run_validation(base, summary_store, runner)
 
             self.assertEqual(result["status"], "pass")
-            comparability = read_json(base / "phase8" / "comparability-report.json")
-            comparison = read_json(base / "phase8" / "comparison-report.json")
-            markdown = (base / "phase8" / "comparison-report.md").read_text(encoding="utf-8")
+            comparability = read_json(base / "comparison" / "comparability-report.json")
+            comparison = read_json(base / "comparison" / "comparison-report.json")
+            markdown = (base / "comparison" / "comparison-report.md").read_text(encoding="utf-8")
             self.assertEqual(comparability["comparability_status"], "pass")
             self.assertEqual(comparison["status"], "warn")
             self.assertEqual(
@@ -95,7 +91,7 @@ class ValidatePhase8LocalTest(unittest.TestCase):
                 "local-efficient",
             )
             self.assertIn("| Machine | Processor |", markdown)
-            self.assertIn("phase8-local-partial-001", markdown)
+            self.assertIn("local-comparison-partial-001", markdown)
 
     def assertNoCloudCommands(self, commands):
         rendered = [" ".join(item["command"]) for item in commands]
@@ -106,13 +102,13 @@ class ValidatePhase8LocalTest(unittest.TestCase):
 
 
 def run_validation(base, summary_store, runner):
-    config = validate_phase8_local.ValidationConfig(
+    config = validate_local_comparison.ValidationConfig(
         summary_store=summary_store,
-        artifacts_dir=base / "phase8",
+        artifacts_dir=base / "comparison",
         schema=SCHEMA,
         repo_root=REPO_ROOT,
     )
-    return validate_phase8_local.run_validation(config, runner=runner)
+    return validate_local_comparison.run_validation(config, runner=runner)
 
 
 def write_ndjson(path, rows):

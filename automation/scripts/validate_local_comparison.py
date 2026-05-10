@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Run local-only Phase 8 validation without cloud credentials."""
+"""Run local comparison validation without cloud credentials."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,22 +16,21 @@ import validate_benchmark_comparability as comparability
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import CommandResult, resolve_path, utc_now, write_ndjson
+
 DEFAULT_SCHEMA = Path("automation/templates/benchmark-summary.schema.json")
 DEFAULT_SUMMARY_STORE = Path("artifacts/benchmark-summaries.ndjson")
-DEFAULT_ARTIFACTS_DIR = Path("artifacts/phase8-local-validation")
+DEFAULT_ARTIFACTS_DIR = Path("artifacts/local-comparison-validation")
 MIN_DURATION_SECONDS = 1200
 MIN_COVERAGE_RATIO = 0.95
 
 
-class Phase8LocalValidationError(RuntimeError):
-    """Raised when local Phase 8 validation cannot complete."""
-
-
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
+class LocalComparisonValidationError(RuntimeError):
+    """Raised when local comparison validation cannot complete."""
 
 
 @dataclass(frozen=True)
@@ -51,7 +48,7 @@ Runner = Callable[[list[str], Path], CommandResult]
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Validate Phase 8 locally with deterministic comparison evidence."
+        description="Validate local comparison evidence with deterministic fixtures."
     )
     parser.add_argument("--summary-store", type=Path, default=DEFAULT_SUMMARY_STORE)
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
@@ -78,12 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         report = run_validation(config)
-    except Phase8LocalValidationError as exc:
+    except LocalComparisonValidationError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     print(report["summary_source_reason"])
     print(
-        "Phase 8 local validation {status}; source={source}; "
+        "local comparison validation {status}; source={source}; "
         "comparability={comparability}; comparison={comparison}".format(
             status=report["status"],
             source=report["summary_source"],
@@ -163,7 +160,7 @@ def run_validation(
         "checks": check_results,
     }
     generate_comparison_report.write_json(
-        config.artifacts_dir / "phase8-local-validation-report.json", report
+        config.artifacts_dir / "local-comparison-validation-report.json", report
     )
     return report
 
@@ -203,8 +200,8 @@ def run_static_checks(config: ValidationConfig, runner: Runner) -> list[dict[str
             }
         )
         if result.returncode != 0:
-            raise Phase8LocalValidationError(
-                "Phase 8 local validation command failed: "
+            raise LocalComparisonValidationError(
+                "local comparison validation command failed: "
                 + " ".join(command)
                 + "\n"
                 + (result.stderr or result.stdout)
@@ -220,7 +217,7 @@ class SelectedRows:
 
 
 def select_validation_rows(config: ValidationConfig, schema: dict[str, Any]) -> SelectedRows:
-    diagnostic_path = config.artifacts_dir.parent / "phase8-existing-comparability-check.json"
+    diagnostic_path = config.artifacts_dir.parent / "local-existing-comparability-check.json"
     existing_path = resolve_path(config.repo_root, config.summary_store)
     schema_fields = comparability.schema_field_set(schema)
     if existing_path.exists():
@@ -256,7 +253,7 @@ def select_validation_rows(config: ValidationConfig, schema: dict[str, Any]) -> 
             source="fixture",
             reason=(
                 f"Bypassing {config.summary_store}: found {len(accepted)} comparable "
-                "P8.1 rows; generated deterministic Phase 8 fixtures instead."
+                "comparison-ready rows; generated deterministic local comparison fixtures instead."
             ),
             valid_rows=comparable_fixture_rows(),
         )
@@ -264,7 +261,7 @@ def select_validation_rows(config: ValidationConfig, schema: dict[str, Any]) -> 
         source="fixture",
         reason=(
             f"Bypassing {config.summary_store}: file does not exist; generated "
-            "deterministic Phase 8 fixtures instead."
+            "deterministic local comparison fixtures instead."
         ),
         valid_rows=comparable_fixture_rows(),
     )
@@ -300,7 +297,7 @@ def accepted_rows(
 def comparable_fixture_rows() -> list[dict[str, Any]]:
     return [
         fixture_row(
-            "phase8-local-fast-001",
+            "local-comparison-fast-001",
             machine_type="local-fast",
             processor_family="local-x86",
             avg_cpu_usage_cores=1.8,
@@ -318,7 +315,7 @@ def comparable_fixture_rows() -> list[dict[str, Any]]:
             benchmark_end="2026-05-09T00:30:00Z",
         ),
         fixture_row(
-            "phase8-local-fast-002",
+            "local-comparison-fast-002",
             machine_type="local-fast",
             processor_family="local-x86",
             avg_cpu_usage_cores=1.7,
@@ -336,7 +333,7 @@ def comparable_fixture_rows() -> list[dict[str, Any]]:
             benchmark_end="2026-05-09T01:30:00Z",
         ),
         fixture_row(
-            "phase8-local-efficient-001",
+            "local-comparison-efficient-001",
             machine_type="local-efficient",
             processor_family="local-arm64",
             architecture="arm64",
@@ -359,7 +356,7 @@ def comparable_fixture_rows() -> list[dict[str, Any]]:
 
 def partial_fixture_row() -> dict[str, Any]:
     row = fixture_row(
-        "phase8-local-partial-001",
+        "local-comparison-partial-001",
         machine_type="local-partial",
         processor_family="local-x86",
         avg_cpu_usage_cores=0.9,
@@ -427,7 +424,7 @@ def fixture_row(
         "generated_at": "2026-05-09T00:00:00Z",
         "invalid_metric_samples": {},
         "load_concurrent_users": 50,
-        "load_profile_source": "phase8-local-validation",
+        "load_profile_source": "local-comparison-validation",
         "load_users_per_second": 10,
         "machine_type": machine_type,
         "max_cpu_throttling_ratio": 0.03,
@@ -467,14 +464,6 @@ def overall_status(
     return "pass"
 
 
-def write_ndjson(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
-        encoding="utf-8",
-    )
-
-
 def run_command(command: list[str], cwd: Path) -> CommandResult:
     env = None
     if command[:4] == [sys.executable, "-m", "unittest", "discover"] and "mcp-server/tests" in command:
@@ -490,22 +479,12 @@ def run_command(command: list[str], cwd: Path) -> CommandResult:
             env=env,
         )
     except FileNotFoundError as exc:
-        raise Phase8LocalValidationError(f"command not found: {command[0]}") from exc
+        raise LocalComparisonValidationError(f"command not found: {command[0]}") from exc
     if result.stdout:
         print(result.stdout, end="")
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
     return CommandResult(result.returncode, result.stdout, result.stderr)
-
-
-def resolve_path(repo_root: Path, path: Path) -> Path:
-    return path if path.is_absolute() else repo_root / path
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
 
 
 if __name__ == "__main__":

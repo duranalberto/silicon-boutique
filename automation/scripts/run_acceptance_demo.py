@@ -17,6 +17,12 @@ import run_local_benchmark
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import read_json, write_json
+
 REPORT_NAME = "acceptance-demo-report.json"
 DASHBOARD_KEY = "online-boutique-benchmark.json"
 EXPECTED_DASHBOARD_UID = "silicon-boutique-online-boutique"
@@ -100,32 +106,22 @@ class AcceptanceDemo:
             sleep=self.sleep,
             popen=self.popen,
         )
-        try:
-            benchmark.provision()
-            benchmark.deploy_workload()
-            benchmark.deploy_monitoring()
-            benchmark.wait_for_required_metrics()
-            benchmark.run_benchmark_window()
-            benchmark.update_monitoring_benchmark_window()
-            benchmark.extract_and_summarize()
+        def capture_evidence(completed_benchmark: run_local_benchmark.LocalBenchmark) -> None:
             self.dashboard_evidence = self.capture_dashboard_evidence(
-                namespace=benchmark.config.namespace,
-                kube_context=benchmark.config.kube_context,
-                run_id=benchmark.config.run_id,
+                namespace=completed_benchmark.config.namespace,
+                kube_context=completed_benchmark.config.kube_context,
+                run_id=completed_benchmark.config.run_id,
             )
-            self.bigquery_evidence = self.maybe_load_bigquery(benchmark.config.run_id)
+            self.bigquery_evidence = self.maybe_load_bigquery(completed_benchmark.config.run_id)
             self.hold_dashboard_if_requested(
-                namespace=benchmark.config.namespace,
-                kube_context=benchmark.config.kube_context,
+                namespace=completed_benchmark.config.namespace,
+                kube_context=completed_benchmark.config.kube_context,
             )
-        except Exception as exc:
-            self.primary_error = exc
-        finally:
-            teardown_error = benchmark.cleanup()
-            benchmark.write_trace()
 
-        if teardown_error and self.primary_error is None:
-            self.primary_error = teardown_error
+        result = benchmark.execute(after_extract=capture_evidence)
+        self.primary_error = result.primary_error
+        if result.teardown_error and self.primary_error is None:
+            self.primary_error = result.teardown_error
 
         status = self.write_acceptance_report(
             run_id=benchmark.config.run_id,
@@ -641,15 +637,6 @@ def config_from_args(args: argparse.Namespace) -> AcceptanceConfig:
         cloud_provider=args.cloud_provider,
         namespace=args.namespace,
     )
-
-
-def read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

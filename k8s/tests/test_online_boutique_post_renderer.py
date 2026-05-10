@@ -4,6 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from chart_test_utils import leading_spaces, section_end, sequence_end, split_documents
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHART = REPO_ROOT / "k8s" / "charts" / "silicon-boutique-online-boutique"
@@ -101,6 +103,56 @@ class OnlineBoutiquePostRendererTest(unittest.TestCase):
             result.stderr,
         )
 
+    def test_post_renderer_updates_existing_env_and_preserves_sidecar(self):
+        rendered = subprocess.run(
+            [sys.executable, str(POST_RENDERER)],
+            input=metadata_configmap()
+            + """
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgenerator
+spec:
+  template:
+    spec:
+      containers:
+      - name: sidecar
+        env:
+        - name: USERS
+          value: keep-sidecar
+      - name: main
+        image: loadgenerator
+        env:
+        - name: USERS
+          value: old-users
+""",
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        documents = split_documents(rendered.stdout)
+        loadgenerator = find_document(documents, "Deployment", "loadgenerator")
+        lines = loadgenerator.splitlines()
+        main = named_list_item(lines, ("spec", "template", "spec", "containers"), "main")
+        sidecar = named_list_item(lines, ("spec", "template", "spec", "containers"), "sidecar")
+
+        self.assertEqual(
+            env_mapping_for_item(lines, main),
+            {
+                "USERS": "9",
+                "RATE": "3",
+                "LOCUST_RUN_TIME": "4m",
+                "CONCURRENT_USERS": "9",
+                "USERS_PER_SECOND": "3",
+                "TEST_DURATION": "4m",
+            },
+        )
+        self.assertEqual(env_mapping_for_item(lines, sidecar), {"USERS": "keep-sidecar"})
+
 
 def render_chart(
     *,
@@ -158,6 +210,21 @@ def render_chart(
         raise AssertionError(f"post-renderer failed:\n{rendered.stderr}")
 
     return split_documents(rendered.stdout)
+
+
+def metadata_configmap():
+    return """apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: silicon-boutique-metadata
+data:
+  labels.json: |-
+    {"silicon-boutique/run-id":"render-test"}
+  annotations.json: |-
+    {"silicon-boutique/teardown-owner":"helm"}
+  load-generator.json: |-
+    {"USERS":"9","RATE":"3","LOCUST_RUN_TIME":"4m","CONCURRENT_USERS":"9","USERS_PER_SECOND":"3","TEST_DURATION":"4m"}
+"""
 
 
 def assert_rendered_metadata(testcase, documents, *, expected_labels):
@@ -228,21 +295,6 @@ def assert_mapping_contains(testcase, expected, actual, label):
             expected_value,
             f"{label} expected {key}={expected_value!r}; got {actual!r}",
         )
-
-
-def split_documents(text):
-    documents = []
-    current = []
-    for line in text.splitlines():
-        if re.match(r"^---\s*$", line):
-            if current:
-                documents.append("\n".join(current))
-                current = []
-            continue
-        current.append(line)
-    if current:
-        documents.append("\n".join(current))
-    return [document for document in documents if document.strip()]
 
 
 def find_document(documents, kind, name):
@@ -362,36 +414,12 @@ def env_mapping_for_item(lines, item_bounds):
     return env
 
 
-def section_end(lines, start, indent):
-    for index in range(start + 1, len(lines)):
-        if lines[index].strip() and leading_spaces(lines[index]) <= indent:
-            return index
-    return len(lines)
-
-
-def sequence_end(lines, start):
-    indent = leading_spaces(lines[start])
-    for index in range(start + 1, len(lines)):
-        if not lines[index].strip():
-            continue
-        line_indent = leading_spaces(lines[index])
-        if line_indent < indent:
-            return index
-        if line_indent == indent and not lines[index].lstrip().startswith("- "):
-            return index
-    return len(lines)
-
-
 def list_item_end(lines, start, end):
     indent = leading_spaces(lines[start])
     for index in range(start + 1, end):
         if re.match(rf"^ {{{indent}}}-\s+", lines[index]):
             return index
     return end
-
-
-def leading_spaces(line):
-    return len(line) - len(line.lstrip(" "))
 
 
 def unquote(value):

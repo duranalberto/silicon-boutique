@@ -106,4 +106,4 @@ When the MCP service is built, it will expose the following tools to the LLM:
 
 ### 5. Implementation Roadmap
 
-[`docs/roadmap.md`](roadmap.md) is the authoritative implementation sequence for this repository. It tracks the current Phase 0 through Phase 5 flow: repo bootstrap, infrastructure, workload deployment, metrics pipeline, automation, and MCP readiness.
+[`docs/roadmap.md`](roadmap.md) is the authoritative implementation sequence for this repository. It tracks the current phase flow from repo bootstrap through production MCP integration and the behavior-preserving refactor work.

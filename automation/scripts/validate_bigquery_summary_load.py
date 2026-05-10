@@ -4,28 +4,27 @@
 from __future__ import annotations
 
 import argparse
-import json
-import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import load_benchmark_summary_to_bigquery as loader
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared import bigquery as bq_helpers
+from silicon_boutique_shared.automation import write_json
 
 
 class BigQueryValidationError(RuntimeError):
     """Raised when the guarded BigQuery validation cannot prove the row."""
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-Runner = Callable[[list[str]], CommandResult]
+CommandResult = bq_helpers.CommandResult
+Runner = bq_helpers.Runner
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,8 +149,11 @@ def query_loaded_row(*, args: argparse.Namespace, runner: Runner) -> dict[str, A
     )
     if result.returncode != 0:
         raise BigQueryValidationError("failed to query loaded BigQuery row: " + result.stderr.strip())
-    rows = json.loads(result.stdout or "[]")
-    run_ids = [row.get("run_id") for row in rows if isinstance(row, dict)]
+    try:
+        rows = bq_helpers.parse_bq_json_array(result.stdout)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryValidationError(str(exc)) from exc
+    run_ids = [row.get("run_id") for row in rows]
     if run_ids != [args.run_id]:
         raise BigQueryValidationError("BigQuery query did not return exactly the validation run_id")
     return {"row_count": len(run_ids), "run_ids": run_ids}
@@ -181,21 +183,9 @@ def cleanup_loaded_row(*, args: argparse.Namespace, runner: Runner) -> None:
 
 def run_bq(command: list[str]) -> CommandResult:
     try:
-        result = subprocess.run(
-            command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError as exc:
-        raise BigQueryValidationError("bq command was not found in PATH") from exc
-    return CommandResult(result.returncode, result.stdout, result.stderr)
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return bq_helpers.run_bq(command)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryValidationError(str(exc)) from exc
 
 
 if __name__ == "__main__":

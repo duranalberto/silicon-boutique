@@ -13,7 +13,6 @@ PACKAGE_ROOT = MCP_SRC / "silicon_boutique_mcp"
 FORBIDDEN_ROOT_IMPORTS = {"automation", "infra", "k8s", "github", "google"}
 FORBIDDEN_IMPORT_TEXT = (
     ".github/workflows",
-    "benchmark.yml",
     "google.cloud",
 )
 

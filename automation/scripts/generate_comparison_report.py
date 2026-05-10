@@ -6,15 +6,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import load_benchmark_summary_to_bigquery as bigquery
 import validate_benchmark_comparability as comparability
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared import bigquery as bq_helpers
 
 
 GROUP_FIELDS = (
@@ -74,14 +79,8 @@ class ComparisonReportError(RuntimeError):
     """Raised when a comparison report cannot be generated."""
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-Runner = Callable[[list[str]], CommandResult]
+CommandResult = bq_helpers.CommandResult
+Runner = bq_helpers.Runner
 
 
 def parse_args() -> argparse.Namespace:
@@ -229,12 +228,9 @@ def query_bigquery_rows(
     if result.returncode != 0:
         raise ComparisonReportError("failed to query BigQuery summaries: " + result.stderr.strip())
     try:
-        payload = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise ComparisonReportError("bq query did not return valid JSON") from exc
-    if not isinstance(payload, list):
-        raise ComparisonReportError("bq query did not return a row array")
-    return [row for row in payload if isinstance(row, dict)]
+        return bq_helpers.parse_bq_json_array(result.stdout)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise ComparisonReportError(str(exc)) from exc
 
 
 def build_comparison_report(
@@ -535,16 +531,9 @@ def utc_now() -> str:
 
 def run_bq(command: list[str]) -> CommandResult:
     try:
-        result = subprocess.run(
-            command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError as exc:
-        raise ComparisonReportError("bq command was not found in PATH") from exc
-    return CommandResult(result.returncode, result.stdout, result.stderr)
+        return bq_helpers.run_bq(command)
+    except bq_helpers.BigQueryHelperError as exc:
+        raise ComparisonReportError(str(exc)) from exc
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
