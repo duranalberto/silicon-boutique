@@ -144,17 +144,12 @@ class BigQueryHistoryStore:
             },
             limit=limit,
         )
-        command = [
-            self.config.bq_command,
-            "query",
-            "--nouse_legacy_sql",
-            "--format=json",
-            "--project_id",
+        command = bq_helpers.query_command(
             self.config.project_id,
-            "--location",
             self.config.location,
             query,
-        ]
+            bq_command=self.config.bq_command,
+        )
         result = self.runner(command)
         if result.returncode != 0:
             raise BigQueryHistoryError(

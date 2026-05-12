@@ -213,24 +213,118 @@ def query_bigquery_rows(
     if limit is not None:
         query += f" LIMIT {limit}"
     result = runner(
-        [
-            "bq",
-            "query",
-            "--nouse_legacy_sql",
-            "--format=json",
-            "--project_id",
-            project_id,
-            "--location",
-            location,
-            query,
-        ]
+        bq_helpers.query_command(project_id, location, query)
     )
     if result.returncode != 0:
         raise ComparisonReportError("failed to query BigQuery summaries: " + result.stderr.strip())
     try:
-        return bq_helpers.parse_bq_json_array(result.stdout)
+        rows = bq_helpers.parse_bq_json_array(result.stdout)
     except bq_helpers.BigQueryHelperError as exc:
         raise ComparisonReportError(str(exc)) from exc
+    return normalize_bigquery_rows(rows)
+
+
+def normalize_bigquery_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [normalize_bigquery_row(row) for row in rows]
+
+
+def normalize_bigquery_row(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    integer_fields = {
+        "node_count",
+        "duration_seconds",
+        "request_count_total",
+        "request_success_count",
+        "request_failure_count",
+        "load_concurrent_users",
+    }
+    float_fields = {
+        "avg_cpu_usage_cores",
+        "max_cpu_usage_cores",
+        "avg_cpu_utilization_pct",
+        "max_cpu_utilization_pct",
+        "avg_memory_working_set_bytes",
+        "max_memory_working_set_bytes",
+        "max_memory_used_gb",
+        "avg_cpu_throttling_ratio",
+        "max_cpu_throttling_ratio",
+        "min_ready_pods",
+        "avg_ready_pods",
+        "max_ready_pods",
+        "max_restarts_total",
+        "frontend_latency_p50_ms",
+        "frontend_latency_p95_ms",
+        "frontend_latency_p99_ms",
+        "frontend_latency_max_ms",
+        "avg_requests_per_second",
+        "load_users_per_second",
+        "node_hourly_price_usd",
+        "benchmark_compute_cost_usd",
+        "cost_per_1m_requests_usd",
+        "metrics_coverage_ratio",
+    }
+    for field in integer_fields:
+        if field in normalized:
+            normalized[field] = parse_int_field(normalized[field])
+    for field in float_fields:
+        if field in normalized:
+            normalized[field] = parse_float_field(normalized[field])
+    if isinstance(normalized.get("invalid_metric_samples"), str):
+        normalized["invalid_metric_samples"] = parse_json_object_field(
+            normalized["invalid_metric_samples"],
+            field="invalid_metric_samples",
+            run_id=str(normalized.get("run_id") or ""),
+        )
+    return normalized
+
+
+def parse_int_field(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if re_fullmatch_int(stripped):
+            return int(stripped)
+    return value
+
+
+def parse_float_field(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
+    if isinstance(value, str):
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return value
+        return parsed if math.isfinite(parsed) else None
+    return value
+
+
+def parse_json_object_field(value: str, *, field: str, run_id: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value or "{}")
+    except json.JSONDecodeError as exc:
+        label = f" for run_id {run_id}" if run_id else ""
+        raise ComparisonReportError(f"BigQuery field {field}{label} is not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        label = f" for run_id {run_id}" if run_id else ""
+        raise ComparisonReportError(f"BigQuery field {field}{label} is not a JSON object")
+    return parsed
+
+
+def re_fullmatch_int(value: str) -> bool:
+    return value.isdigit() or (value.startswith("-") and value[1:].isdigit())
 
 
 def build_comparison_report(

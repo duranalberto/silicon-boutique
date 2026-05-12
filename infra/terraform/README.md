@@ -75,6 +75,14 @@ timeout 60s terraform plan -refresh=false -input=false -var='project_id=example-
 ```
 
 The default destination is `<project-id>.silicon_boutique.benchmark_summaries` in location `US`. The benchmark workflow service account needs permission to inspect the table, query duplicate `run_id` values, and load rows.
+Pass the GitHub Actions service account email to the durable root so Terraform manages the writer permissions:
+
+```bash
+terraform apply -auto-approve \
+  -var='project_id=<project-id>' \
+  -var='summary_writer_service_accounts=["<github-actions-service-account>@<project-id>.iam.gserviceaccount.com"]' \
+  -var='static_validation_mode=false'
+```
 
 ## AWS EKS
 

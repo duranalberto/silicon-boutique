@@ -135,17 +135,7 @@ def query_loaded_row(*, args: argparse.Namespace, runner: Runner) -> dict[str, A
         f"WHERE run_id = {loader.sql_string(args.run_id)}"
     )
     result = runner(
-        [
-            "bq",
-            "query",
-            "--nouse_legacy_sql",
-            "--format=json",
-            "--project_id",
-            args.project_id,
-            "--location",
-            args.location,
-            query,
-        ]
+        bq_helpers.query_command(args.project_id, args.location, query)
     )
     if result.returncode != 0:
         raise BigQueryValidationError("failed to query loaded BigQuery row: " + result.stderr.strip())
@@ -166,16 +156,12 @@ def cleanup_loaded_row(*, args: argparse.Namespace, runner: Runner) -> None:
         f"WHERE run_id = {loader.sql_string(args.run_id)}"
     )
     result = runner(
-        [
-            "bq",
-            "query",
-            "--nouse_legacy_sql",
-            "--project_id",
+        bq_helpers.query_command(
             args.project_id,
-            "--location",
             args.location,
             query,
-        ]
+            format_json=False,
+        )
     )
     if result.returncode != 0:
         raise BigQueryValidationError("failed to delete validation BigQuery row: " + result.stderr.strip())

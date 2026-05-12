@@ -64,25 +64,104 @@ running Terraform-backed commands:
 
 If Docker is unavailable or minikube cannot start, fix the devcontainer Docker socket access before running benchmark commands.
 
-## Run A Quick Local Benchmark
+## Run The Local Benchmark Workflow
 
-Use a short smoke benchmark when you want a fast local check. The lowered duration threshold matches the shorter measured window:
+Use the one-command local workflow when you want the same local benchmark shape
+that the guarded GitHub Actions benchmark uses, including BigQuery persistence
+and a remote row validation query. The workflow verifies the local toolchain,
+starts or repairs the managed `siliconboutique` minikube profile when needed,
+runs a short smoke benchmark, writes run-scoped artifacts, and validates that
+the canonical summary row was persisted to BigQuery.
+
+```bash
+python3 automation/scripts/run_local_benchmark_workflow.py
+```
+
+Artifacts and debug logs are written under
+`artifacts/local-workflow/<run-id>/`. Key files include
+`local-workflow-report.json`, `workflow.log`, per-command logs under
+`commands/`, and `issue-report.json` when a workflow step fails. Benchmark
+artifacts such as `benchmark-summary.json`, `bigquery-load-report.json`,
+`workflow-trace.json`, and teardown logs are preserved in the same run-scoped
+directory.
+
+On a cold minikube profile, the first smoke run can spend several extra minutes warming images and waiting for Prometheus recording rules to emit the required metric series before the configured benchmark window starts.
+
+For a normal full-duration local benchmark, use:
+
+```bash
+python3 automation/scripts/run_local_benchmark_workflow.py --full-duration
+```
+
+To provide a custom run ID:
+
+```bash
+python3 automation/scripts/run_local_benchmark_workflow.py \
+  --run-id local-smoke-20260511-201554
+```
+
+## Persist Local Summaries To BigQuery
+
+Local BigQuery persistence writes the canonical `BenchmarkSummary` row to the durable history table. It does not store raw Prometheus time-series samples.
+
+Create local-only credentials:
+
+```bash
+cp credential.env.example credential.env
+```
+
+Set `PROJECT_ID`, `BIGQUERY_DATASET`, `BIGQUERY_TABLE`, and `BIGQUERY_LOCATION` in `credential.env`. For authentication, prefer Application Default Credentials:
+
+```bash
+gcloud auth application-default login
+```
+
+If a service account key is required, store it outside git or under the ignored `credentials/` directory and set `GOOGLE_APPLICATION_CREDENTIALS` in `credential.env`. The `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` values are for GitHub Actions OIDC workflows; local BigQuery loads use ADC or `GOOGLE_APPLICATION_CREDENTIALS`.
+
+Provision the durable destination first:
+
+```bash
+set -a
+. credential.env
+set +a
+cd infra/terraform/gcp-bigquery
+terraform init
+terraform apply -auto-approve \
+  -var="project_id=$PROJECT_ID" \
+  -var="static_validation_mode=false"
+cd ../../..
+```
+
+The recommended workflow requires BigQuery persistence and validates the remote
+row automatically:
+
+```bash
+python3 automation/scripts/run_local_benchmark_workflow.py
+```
+
+To query the loaded row manually, use the run ID from
+`local-workflow-report.json`:
+
+```bash
+bq query --nouse_legacy_sql \
+  "SELECT run_id, machine_type, benchmark_start, summary_status
+   FROM \`$PROJECT_ID.$BIGQUERY_DATASET.$BIGQUERY_TABLE\`
+   WHERE run_id = '<your-local-run-id>'"
+```
+
+For advanced debugging, `automation/scripts/run_local_benchmark.py` remains the
+lower-level entrypoint. It provisions the namespace, deploys workload and
+monitoring charts, runs the load generator, extracts metrics, validates the
+current run's summary row, optionally persists BigQuery, and tears down the
+namespace by default:
 
 ```bash
 python3 automation/scripts/run_local_benchmark.py \
   --run-id local-smoke \
   --test-duration 2m \
-  --min-duration-seconds 60
-```
-
-This command provisions the namespace, deploys workload and monitoring charts, runs the load generator, extracts metrics, writes artifacts, validates the current run's summary row, and tears down the namespace by default.
-
-On a cold minikube profile, the first smoke run can spend several extra minutes warming images and waiting for Prometheus recording rules to emit the required metric series before the configured benchmark window starts.
-
-For a normal local benchmark, omit the smoke-test overrides:
-
-```bash
-python3 automation/scripts/run_local_benchmark.py
+  --min-duration-seconds 60 \
+  --persist-bigquery \
+  --bigquery-env-file credential.env
 ```
 
 ## Run The Acceptance Demo

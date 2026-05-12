@@ -4,6 +4,8 @@ locals {
     managed_by = "terraform"
     purpose    = "benchmark_history"
   }
+
+  summary_writer_service_accounts = toset(var.summary_writer_service_accounts)
 }
 
 resource "google_bigquery_dataset" "benchmark_history" {
@@ -35,4 +37,20 @@ resource "google_bigquery_table" "benchmark_summaries" {
     "architecture",
     "run_id",
   ]
+}
+
+resource "google_project_iam_member" "summary_writer_job_user" {
+  for_each = local.summary_writer_service_accounts
+
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${each.value}"
+}
+
+resource "google_bigquery_dataset_iam_member" "summary_writer_data_editor" {
+  for_each = local.summary_writer_service_accounts
+
+  dataset_id = google_bigquery_dataset.benchmark_history.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${each.value}"
 }

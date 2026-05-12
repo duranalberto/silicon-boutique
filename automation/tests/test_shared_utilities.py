@@ -47,6 +47,51 @@ class SharedBigQueryUtilitiesTest(unittest.TestCase):
         self.assertEqual(bigquery.table_ref("valid-proj1", "ds", "tbl"), "valid-proj1:ds.tbl")
         self.assertEqual(bigquery.table_sql_name("valid-proj1", "ds", "tbl"), "valid-proj1.ds.tbl")
         self.assertEqual(bigquery.sql_string("a'b\\c"), "'a\\'b\\\\c'")
+        self.assertEqual(
+            bigquery.show_table_command("valid-proj1", "ds", "tbl"),
+            ["bq", "--format=json", "--project_id", "valid-proj1", "show", "valid-proj1:ds.tbl"],
+        )
+        self.assertEqual(
+            bigquery.query_command("valid-proj1", "US", "SELECT 1"),
+            [
+                "bq",
+                "--format=json",
+                "--project_id",
+                "valid-proj1",
+                "--location",
+                "US",
+                "query",
+                "--nouse_legacy_sql",
+                "SELECT 1",
+            ],
+        )
+        self.assertEqual(
+            bigquery.load_command("valid-proj1", "ds", "tbl", "US", "/tmp/rows.ndjson", "schema.json"),
+            [
+                "bq",
+                "--project_id",
+                "valid-proj1",
+                "--location",
+                "US",
+                "load",
+                "--source_format=NEWLINE_DELIMITED_JSON",
+                "valid-proj1:ds.tbl",
+                "/tmp/rows.ndjson",
+                "schema.json",
+            ],
+        )
+        self.assertEqual(
+            bigquery.delete_table_command("valid-proj1", "ds", "tbl"),
+            [
+                "bq",
+                "--project_id",
+                "valid-proj1",
+                "rm",
+                "-f",
+                "-t",
+                "valid-proj1:ds.tbl",
+            ],
+        )
 
         with self.assertRaises(bigquery.BigQueryHelperError):
             bigquery.validate_destination("INVALID", "dataset_1", "table_1", "US")

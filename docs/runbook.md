@@ -90,6 +90,16 @@ The generated `artifacts/` directory uses the same artifact names as the GitHub 
 
 To inspect the Grafana dashboard after a local automated run, use `--skip-destroy`, port-forward Grafana from the benchmark namespace, and manually clean up the Helm releases plus Terraform namespace when finished.
 
+Local benchmark BigQuery persistence is opt-in. Copy `credential.env.example` to the ignored `credential.env`, set `PROJECT_ID`, `BIGQUERY_DATASET`, `BIGQUERY_TABLE`, and `BIGQUERY_LOCATION`, and authenticate locally with `gcloud auth application-default login` or an ignored service account key referenced by `GOOGLE_APPLICATION_CREDENTIALS`. Provision `infra/terraform/gcp-bigquery` before the first load, then run:
+
+```bash
+python3 automation/scripts/run_local_benchmark.py \
+  --persist-bigquery \
+  --bigquery-env-file credential.env
+```
+
+The local BigQuery path persists the canonical `BenchmarkSummary` row only; raw Prometheus samples remain local artifacts. `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` are GitHub Actions OIDC settings and are not sufficient by themselves for local `bq` CLI authentication.
+
 ## Acceptance Demo
 
 Use the acceptance demo when you want one command that proves the required use case end to end. The local path provisions the benchmark namespace, deploys Online Boutique and monitoring, runs the load generator, extracts Prometheus and load-generator metrics, generates and validates a `BenchmarkSummary`, verifies Grafana dashboard evidence through the Grafana API, writes `artifacts/acceptance-demo-report.json`, and then tears down the namespace.
@@ -371,10 +381,12 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --concurrent-users "$concurrent_users" \
   --users-per-second "$users_per_second" \
   --load-profile-source manual \
+  --min-coverage-ratio 0.95 \
   --strict
 ```
 
 For GCP summaries, pass `--region`, `--zone`, `--pricing-model`, optional `--cpu-platform`, and `--pricing-table automation/templates/machine-pricing.json` so `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` are populated from the repo-owned pricing table. The GCP workflow maps `pricing_model=spot` to Spot nodes and `pricing_model=on_demand` to regular on-demand nodes.
+The generated `summary_status` is `complete` when required metric series, derived fields, and load-generator stats are present and `metrics_coverage_ratio` meets the configured minimum coverage ratio. The default coverage floor is `0.95`, matching the summary validator, so a run does not need perfect edge-sample coverage to be eligible for BigQuery loading.
 
 To calibrate local load settings before a comparison run:
 
@@ -436,18 +448,34 @@ python3 automation/scripts/generate_comparison_report.py \
   --markdown-output artifacts/comparison-report.md
 ```
 
-For durable BigQuery history, query the benchmark summary table directly. Add filters such as `--machine-type`, `--processor-family`, `--architecture`, `--cloud-provider`, `--pricing-model`, or `--limit` to narrow the comparison set:
+To inspect the same local summary store in the portable HTML dashboard, run:
 
 ```bash
-python3 automation/scripts/generate_comparison_report.py \
+python3 automation/scripts/launch_metrics_dashboard.py --no-browser
+```
+
+The launcher writes `artifacts/dashboard/index.html` and `artifacts/dashboard/dashboard-data.json`, then prints a localhost URL. It defaults to `artifacts/benchmark-summaries.ndjson`, uses the same grouping, ranking, warning, rejected-run, and summary-quality rules as the comparison report, and records dashboard source metadata as `type=ndjson`.
+
+To inspect durable BigQuery history in the same portable dashboard, query the benchmark summary table directly:
+
+```bash
+python3 automation/scripts/launch_metrics_dashboard.py \
   --project-id "$project_id" \
   --dataset-id silicon_boutique \
   --table-id benchmark_summaries \
   --location US \
-  --schema automation/templates/benchmark-summary.schema.json \
-  --report-output artifacts/comparison-report.json \
-  --markdown-output artifacts/comparison-report.md
+  --no-browser
 ```
+
+Add filters such as `--machine-type`, `--processor-family`, `--architecture`, `--cloud-provider`, `--pricing-model`, or `--limit` to narrow local or BigQuery dashboard data. Use `--no-browser` in headless devcontainer sessions and `--no-serve` when regenerating `artifacts/dashboard/` files for artifact inspection only.
+
+The portable dashboard visualizes stored benchmark summaries after they have been generated or loaded into BigQuery. It is separate from the private Grafana dashboard, which is a live Kubernetes monitoring view used during a benchmark run.
+
+Troubleshooting:
+
+- `summary store does not exist: artifacts/benchmark-summaries.ndjson` means no local benchmark summary has been generated yet.
+- Incomplete BigQuery arguments fail before querying; provide `--project-id`, `--dataset-id`, `--table-id`, and `--location` together.
+- BigQuery access errors come from local `bq` credentials, dataset/table permissions, or a missing provisioned history table.
 
 Clean up monitoring before uninstalling the workload and destroying the Terraform-owned namespace:
 
@@ -587,8 +615,11 @@ cd infra/terraform/gcp-bigquery
 terraform init
 terraform apply -auto-approve \
   -var="project_id=$project_id" \
+  -var="summary_writer_service_accounts=[\"$GCP_SERVICE_ACCOUNT\"]" \
   -var="static_validation_mode=false"
 ```
+
+`GCP_SERVICE_ACCOUNT` should be the service account email configured in the GitHub Actions secret, without a `serviceAccount:` prefix. The BigQuery root grants that identity `roles/bigquery.jobUser` on the project and `roles/bigquery.dataEditor` on the durable dataset. Those grants let the workflow inspect the destination, run duplicate-check queries, create the preflight scratch table, load canonical summary rows, and clean up the scratch table.
 
 The workflow derives a DNS-safe `run_id` as `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`. That identifier is passed into Terraform, Helm metadata, metric extraction, summary generation, and the BigQuery duplicate check.
 
@@ -609,6 +640,8 @@ The job runs the standard benchmark sequence:
 13. Capture traceability outputs.
 14. Upload the generated benchmark artifacts.
 
+Before step 1, the workflow runs a BigQuery preflight through `automation/scripts/load_benchmark_summary_to_bigquery.py --preflight-only --preflight-write-probe`. This validates the destination identifiers, table schema, no-row query access, and a scratch-table load/delete before any run-scoped GKE resources are created. If the preflight or final load fails, `bigquery-load-report.json` includes the failed stage plus bounded redacted stdout/stderr previews from the `bq` command.
+
 The uploaded artifact is named `benchmark-gha-<github-run-id>-<attempt>` and should contain Prometheus metrics, the canonical summary JSON, the local BigQuery-ready NDJSON row, the comparability report, `bigquery-load-report.json`, and Terraform metadata snapshots for managed resources and teardown checks.
 
 To verify persistence, query by the workflow `run_id`:
@@ -621,6 +654,8 @@ bq query --nouse_legacy_sql \
 ```
 
 Duplicate `run_id` values fail before loading, so rerun attempts should use their GitHub-derived attempt-specific `run_id` or explicitly clean up a test row.
+
+Workflow logs from May 11, 2026 warned that GitHub-hosted runners will force Node.js 24 for JavaScript actions on June 2, 2026 and remove Node.js 20 on September 16, 2026. Keep the pinned checkout, auth, setup, and artifact actions on Node.js 24-compatible releases before that change affects benchmark dispatches.
 
 For a guarded load/query proof against a test table, use the validation helper. It loads one row, queries it by `run_id`, and only deletes that exact test row when `--cleanup-row` is set:
 

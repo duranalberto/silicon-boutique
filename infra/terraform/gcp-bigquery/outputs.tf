@@ -27,3 +27,8 @@ output "labels" {
   description = "Labels applied to durable BigQuery resources."
   value       = local.labels
 }
+
+output "summary_writer_service_accounts" {
+  description = "Service account emails granted BigQuery summary writer access."
+  value       = var.summary_writer_service_accounts
+}

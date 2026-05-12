@@ -70,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--load-profile-source", default="manual")
     parser.add_argument("--loadgenerator-stats", type=Path)
     parser.add_argument("--pricing-table", type=Path)
+    parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
     parser.add_argument(
         "--generated-at",
         help="UTC timestamp to use for generated_at. Defaults to the current time.",
@@ -84,7 +85,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail when required metadata, metric quality, or derived fields are invalid.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not 0 <= args.min_coverage_ratio <= 1:
+        parser.error("--min-coverage-ratio must be between 0 and 1")
+    return args
 
 
 def main() -> int:
@@ -113,6 +117,7 @@ def main() -> int:
             users_per_second=args.users_per_second,
             load_profile_source=args.load_profile_source,
             generated_at=args.generated_at,
+            min_coverage_ratio=args.min_coverage_ratio,
         )
         validate_summary(summary, strict=args.strict)
         assert_summary_store_accepts(
@@ -154,6 +159,7 @@ def build_summary(
     users_per_second: str | None,
     load_profile_source: str,
     generated_at: str | None,
+    min_coverage_ratio: float,
 ) -> dict[str, Any]:
     window = metrics_payload.get("window", {})
     quality = metrics_payload.get("quality", {})
@@ -257,7 +263,9 @@ def build_summary(
         "empty_metrics": quality.get("empty_series", []),
         "invalid_metric_samples": quality.get("invalid_samples", {}),
     }
-    summary["summary_status"] = summary_status(summary)
+    summary["summary_status"] = summary_status(
+        summary, min_coverage_ratio=min_coverage_ratio
+    )
     return summary
 
 
@@ -496,7 +504,7 @@ def seconds_to_ms(value: float | None) -> float | None:
     return round(value * MS_PER_SECOND, 6)
 
 
-def summary_status(summary: dict[str, Any]) -> str:
+def summary_status(summary: dict[str, Any], *, min_coverage_ratio: float = 0.95) -> str:
     if (
         summary.get("missing_metrics")
         or summary.get("empty_metrics")
@@ -505,7 +513,7 @@ def summary_status(summary: dict[str, Any]) -> str:
         return "partial"
     if any(summary.get(field) is None for field in REQUIRED_DERIVED_FIELDS):
         return "partial"
-    if summary.get("metrics_coverage_ratio", 0) < 1:
+    if summary.get("metrics_coverage_ratio", 0) < min_coverage_ratio:
         return "partial"
     return "complete"
 

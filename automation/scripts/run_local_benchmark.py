@@ -37,6 +37,7 @@ from silicon_boutique_shared.automation import (
 )
 
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class LocalBenchmarkError(RuntimeError):
@@ -70,6 +71,12 @@ class BenchmarkConfig:
     min_coverage_ratio: float
     failure_stage: str
     skip_destroy: bool
+    persist_bigquery: bool
+    bigquery_env_file: Path | None
+    bigquery_project_id: str
+    bigquery_dataset: str
+    bigquery_table: str
+    bigquery_location: str
 
     environment: str = "local"
     cloud_provider: str = "local"
@@ -155,6 +162,7 @@ class LocalBenchmark:
     def execute(self, after_extract=None) -> BenchmarkWorkflowResult:
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         try:
+            self.preflight_bigquery()
             self.provision()
             self.fail_if_requested("after_provision")
             self.deploy_workload()
@@ -250,6 +258,41 @@ class LocalBenchmark:
                 "name_prefix": output_value(outputs, "name_prefix", ""),
             },
         )
+
+    def preflight_bigquery(self) -> None:
+        if not self.config.persist_bigquery:
+            return
+        result = self.runner.run(
+            [
+                sys.executable,
+                "automation/scripts/load_benchmark_summary_to_bigquery.py",
+                "--project-id",
+                self.config.bigquery_project_id,
+                "--dataset-id",
+                self.config.bigquery_dataset,
+                "--table-id",
+                self.config.bigquery_table,
+                "--location",
+                self.config.bigquery_location,
+                "--schema",
+                "automation/templates/benchmark-summary.bigquery-schema.json",
+                "--load-report-output",
+                str(self.bigquery_load_report_path),
+                "--duplicate-policy",
+                "fail",
+                "--preflight-only",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture=True,
+        )
+        if result.returncode != 0:
+            detail = summarize_command_failure(result)
+            suffix = f": {detail}" if detail else ""
+            raise LocalBenchmarkError(
+                "BigQuery preflight failed; inspect "
+                f"{self.bigquery_load_report_path}{suffix}"
+            )
 
     def validate_kubernetes_context(self) -> None:
         result = self.runner.run(
@@ -631,6 +674,8 @@ class LocalBenchmark:
                 self.config.users_per_second,
                 "--load-profile-source",
                 self.config.load_profile_source,
+                "--min-coverage-ratio",
+                str(self.config.min_coverage_ratio),
                 "--strict",
             ],
             cwd=REPO_ROOT,
@@ -657,6 +702,45 @@ class LocalBenchmark:
             ],
             cwd=REPO_ROOT,
         )
+        self.load_summary_to_bigquery(summary_store_path)
+
+    def load_summary_to_bigquery(self, summary_store_path: Path) -> None:
+        if not self.config.persist_bigquery:
+            return
+        result = self.runner.run(
+            [
+                sys.executable,
+                "automation/scripts/load_benchmark_summary_to_bigquery.py",
+                "--summary-store",
+                str(summary_store_path),
+                "--project-id",
+                self.config.bigquery_project_id,
+                "--dataset-id",
+                self.config.bigquery_dataset,
+                "--table-id",
+                self.config.bigquery_table,
+                "--location",
+                self.config.bigquery_location,
+                "--schema",
+                "automation/templates/benchmark-summary.bigquery-schema.json",
+                "--load-report-output",
+                str(self.bigquery_load_report_path),
+                "--duplicate-policy",
+                "fail",
+                "--run-id",
+                self.config.run_id,
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture=True,
+        )
+        if result.returncode != 0:
+            detail = summarize_command_failure(result)
+            suffix = f": {detail}" if detail else ""
+            raise LocalBenchmarkError(
+                "BigQuery summary load failed; inspect "
+                f"{self.bigquery_load_report_path}{suffix}"
+            )
 
     @contextmanager
     def port_forward_prometheus(self):
@@ -843,6 +927,8 @@ class LocalBenchmark:
         summary_path = artifacts_dir / "benchmark-summary.json"
         summary_store_path = artifacts_dir / "benchmark-summaries.ndjson"
         trace_path = artifacts_dir / "workflow-trace.json"
+        bigquery_summary_table = self.bigquery_summary_table
+        bigquery_load_report_path = self.bigquery_load_report_path
         trace = {
             "github": {},
             "benchmark": {
@@ -865,9 +951,19 @@ class LocalBenchmark:
                 "load_profile_source": self.config.load_profile_source,
             },
             "gcp": {
-                "project_id": "",
+                "project_id": self.config.bigquery_project_id,
                 "region": self.config.region,
                 "zone": self.config.zone,
+            },
+            "bigquery": {
+                "project_id": self.config.bigquery_project_id,
+                "dataset": self.config.bigquery_dataset,
+                "table": self.config.bigquery_table,
+                "location": self.config.bigquery_location,
+                "summary_table": bigquery_summary_table,
+                "load_report_path": str(bigquery_load_report_path),
+                "load_report_exists": bool_string(bigquery_load_report_path.exists()),
+                "persist_requested": bool_string(self.config.persist_bigquery),
             },
             "artifacts": {
                 "artifact_name": self.config.summary_artifact_name,
@@ -894,7 +990,7 @@ class LocalBenchmark:
                 "run_id": self.config.run_id,
                 "environment": self.config.environment,
                 "cloud_provider": self.config.cloud_provider,
-                "project_id": "",
+                "project_id": self.config.bigquery_project_id,
                 "region": self.config.region,
                 "zone": self.config.zone,
                 "machine_type": self.config.machine_type,
@@ -910,6 +1006,11 @@ class LocalBenchmark:
                 "summary_path": str(summary_path),
                 "summary_store_path": str(summary_store_path),
                 "loadgenerator_stats_path": str(artifacts_dir / "loadgenerator-stats.json"),
+                "bigquery_dataset": self.config.bigquery_dataset,
+                "bigquery_table": self.config.bigquery_table,
+                "bigquery_location": self.config.bigquery_location,
+                "bigquery_summary_table": bigquery_summary_table,
+                "bigquery_load_report_path": str(bigquery_load_report_path),
                 "trace_path": str(trace_path),
                 "teardown_succeeded": self.config.destroy_succeeded,
                 "destroy_attempted": self.config.destroy_attempted,
@@ -922,6 +1023,24 @@ class LocalBenchmark:
             raise LocalBenchmarkError(
                 f"Controlled failure requested with failure_stage={stage}."
             )
+
+    @property
+    def bigquery_load_report_path(self) -> Path:
+        return self.config.artifacts_dir / "bigquery-load-report.json"
+
+    @property
+    def bigquery_summary_table(self) -> str:
+        if not (
+            self.config.bigquery_project_id
+            and self.config.bigquery_dataset
+            and self.config.bigquery_table
+        ):
+            return ""
+        return (
+            f"{self.config.bigquery_project_id}."
+            f"{self.config.bigquery_dataset}."
+            f"{self.config.bigquery_table}"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -976,6 +1095,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Leave the Terraform-owned namespace in place for debugging.",
     )
+    parser.add_argument(
+        "--persist-bigquery",
+        action="store_true",
+        help="Preflight and load the generated local benchmark summary row into BigQuery.",
+    )
+    parser.add_argument(
+        "--bigquery-env-file",
+        type=Path,
+        default=Path("credential.env"),
+        help="Optional local env file containing BigQuery project and Google credentials.",
+    )
+    parser.add_argument("--bigquery-project-id")
+    parser.add_argument("--bigquery-dataset")
+    parser.add_argument("--bigquery-table")
+    parser.add_argument("--bigquery-location")
     args = parser.parse_args(argv)
     validate_args(args, parser)
     return args
@@ -996,9 +1130,32 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         parse_duration_seconds(args.test_duration)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.persist_bigquery:
+        try:
+            env_values = read_env_file(args.bigquery_env_file)
+        except ValueError as exc:
+            parser.error(str(exc))
+        args._bigquery_env_values = env_values
+        resolved = resolve_bigquery_settings(args, env_values)
+        missing = [name for name, value in resolved.items() if not value]
+        if missing:
+            parser.error(
+                "--persist-bigquery requires BigQuery settings for: "
+                + ", ".join(sorted(missing))
+            )
+        args._resolved_bigquery = resolved
 
 
 def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
+    env_values = getattr(args, "_bigquery_env_values", None)
+    if env_values is None and getattr(args, "persist_bigquery", False):
+        env_values = read_env_file(args.bigquery_env_file)
+        args._bigquery_env_values = env_values
+    if env_values:
+        apply_env_values(env_values)
+    bigquery = getattr(args, "_resolved_bigquery", None)
+    if bigquery is None:
+        bigquery = resolve_bigquery_settings(args, env_values or {})
     load_profile = load_profile_from_file(args.load_profile_file)
     concurrent_users = str(
         load_profile.get("load_concurrent_users", args.concurrent_users)
@@ -1037,6 +1194,12 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         min_coverage_ratio=args.min_coverage_ratio,
         failure_stage=args.failure_stage,
         skip_destroy=args.skip_destroy,
+        persist_bigquery=args.persist_bigquery,
+        bigquery_env_file=args.bigquery_env_file,
+        bigquery_project_id=bigquery["project_id"],
+        bigquery_dataset=bigquery["dataset"],
+        bigquery_table=bigquery["table"],
+        bigquery_location=bigquery["location"],
     )
 
 
@@ -1047,6 +1210,61 @@ def load_profile_from_file(path: Path | None) -> dict[str, Any]:
     if "selected_profile" in payload and isinstance(payload["selected_profile"], dict):
         payload = payload["selected_profile"]
     return payload if isinstance(payload, dict) else {}
+
+
+def read_env_file(path: Path | None) -> dict[str, str]:
+    if path is None or not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line.removeprefix("export ").strip()
+        if "=" not in line:
+            raise ValueError(f"invalid env file line {line_number}: expected KEY=VALUE")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not ENV_KEY_PATTERN.match(key):
+            raise ValueError(f"invalid env file line {line_number}: invalid key")
+        values[key] = unquote_env_value(value.strip())
+    return values
+
+
+def unquote_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def apply_env_values(values: dict[str, str]) -> None:
+    for key, value in values.items():
+        os.environ.setdefault(key, value)
+
+
+def resolve_bigquery_settings(
+    args: argparse.Namespace, env_values: dict[str, str]
+) -> dict[str, str]:
+    def value(cli_value: str | None, *env_names: str) -> str:
+        if cli_value:
+            return cli_value.strip()
+        for name in env_names:
+            existing = os.environ.get(name, "").strip()
+            if existing:
+                return existing
+        for name in env_names:
+            file_value = env_values.get(name, "").strip()
+            if file_value:
+                return file_value
+        return ""
+
+    return {
+        "project_id": value(args.bigquery_project_id, "BIGQUERY_PROJECT_ID", "PROJECT_ID"),
+        "dataset": value(args.bigquery_dataset, "BIGQUERY_DATASET"),
+        "table": value(args.bigquery_table, "BIGQUERY_TABLE"),
+        "location": value(args.bigquery_location, "BIGQUERY_LOCATION"),
+    }
 
 
 def parse_duration_seconds(value: str) -> int:

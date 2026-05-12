@@ -104,6 +104,7 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn("helm upgrade --install \"$WORKLOAD_RELEASE\"", workflow)
         self.assertIn("helm upgrade --install \"$MONITORING_RELEASE\"", workflow)
         self.assertIn("--cloud-provider aws", workflow)
+        self.assertIn("--min-coverage-ratio 0.95", workflow)
         self.assertIn("load_benchmark_summary_to_bigquery.py", workflow)
         self.assertIn("run_acceptance_demo.py", workflow)
         self.assertIn("terraform destroy -auto-approve", workflow)

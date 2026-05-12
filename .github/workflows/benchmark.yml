@@ -255,6 +255,20 @@ jobs:
             echo "ENABLE_SPOT_NODES=$enable_spot_nodes"
           } >> "$GITHUB_ENV"
 
+      - name: Preflight BigQuery destination
+        run: |
+          python3 automation/scripts/load_benchmark_summary_to_bigquery.py \
+            --project-id "$PROJECT_ID" \
+            --dataset-id "$BIGQUERY_DATASET" \
+            --table-id "$BIGQUERY_TABLE" \
+            --location "$BIGQUERY_LOCATION" \
+            --schema automation/templates/benchmark-summary.bigquery-schema.json \
+            --load-report-output "$ARTIFACTS_DIR/bigquery-load-report.json" \
+            --duplicate-policy fail \
+            --run-id "$RUN_ID" \
+            --preflight-write-probe \
+            --preflight-only
+
       - name: Initialize Terraform
         working-directory: ${{ env.TERRAFORM_DIR }}
         run: terraform init -input=false
@@ -500,6 +514,7 @@ jobs:
             --concurrent-users "$CONCURRENT_USERS" \
             --users-per-second "$USERS_PER_SECOND" \
             --load-profile-source "$LOAD_PROFILE_SOURCE" \
+            --min-coverage-ratio 0.95 \
             --strict
 
       - name: Validate benchmark summary
@@ -510,7 +525,7 @@ jobs:
             --report-output "$ARTIFACTS_DIR/comparability-report.json" \
             --run-id "$RUN_ID" \
             --mode summary \
-            --min-duration-seconds 1200 \
+            --min-duration-seconds "$TEST_DURATION_SECONDS" \
             --min-coverage-ratio 0.95 \
             --strict
 

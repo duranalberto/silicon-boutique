@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -232,12 +233,25 @@ class GenerateComparisonReportTest(unittest.TestCase):
         )
 
     def test_bigquery_source_builds_filtered_query_and_parses_rows(self):
-        runner = FakeRunner(
-            [
-                self.valid_summary("run-a"),
-                self.valid_summary("run-b", machine_type="t2a-standard-4", processor_family="t2a"),
-            ]
+        run_a = self.valid_summary("run-a")
+        run_b = self.valid_summary(
+            "run-b", machine_type="t2a-standard-4", processor_family="t2a"
         )
+        for row in (run_a, run_b):
+            for field in (
+                "node_count",
+                "duration_seconds",
+                "request_count_total",
+                "request_success_count",
+                "request_failure_count",
+                "load_concurrent_users",
+                "avg_cpu_usage_cores",
+                "frontend_latency_p99_ms",
+                "metrics_coverage_ratio",
+            ):
+                row[field] = str(row[field])
+            row["invalid_metric_samples"] = "{}"
+        runner = FakeRunner([run_a, run_b])
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "comparison.json"
             markdown = Path(tmpdir) / "comparison.md"
@@ -270,13 +284,50 @@ class GenerateComparisonReportTest(unittest.TestCase):
                 exit_code = reporter.main()
 
             payload = json.loads(output.read_text(encoding="utf-8"))
+            command = runner.commands[0]
             query = runner.commands[0][-1]
             self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["comparable_run_count"], 1)
+            self.assertEqual(command[:4], ["bq", "--format=json", "--project_id", "example-project"])
+            self.assertEqual(command[4:8], ["--location", "US", "query", "--nouse_legacy_sql"])
             self.assertEqual(payload["source"]["type"], "bigquery")
             self.assertIn("FROM `example-project.silicon_boutique.benchmark_summaries`", query)
             self.assertIn("machine_type = 'c3-standard-4'", query)
             self.assertIn("pricing_model = 'spot'", query)
             self.assertIn("LIMIT 5", query)
+
+    def test_bigquery_json_object_parse_error_is_reported(self):
+        row = self.valid_summary("run-a")
+        row["invalid_metric_samples"] = "not-json"
+        runner = FakeRunner([row])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "comparison.json"
+            markdown = Path(tmpdir) / "comparison.md"
+            argv = [
+                "generate_comparison_report.py",
+                "--project-id",
+                "example-project",
+                "--dataset-id",
+                "silicon_boutique",
+                "--table-id",
+                "benchmark_summaries",
+                "--location",
+                "US",
+                "--schema",
+                str(SCHEMA),
+                "--report-output",
+                str(output),
+                "--markdown-output",
+                str(markdown),
+            ]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                reporter, "run_bq", runner
+            ), mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                exit_code = reporter.main()
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("invalid_metric_samples", stderr.getvalue())
 
 
 if __name__ == "__main__":

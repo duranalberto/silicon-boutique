@@ -17,9 +17,13 @@ __pycache__/
 
 # Generated benchmark outputs
 artifacts/
+logs/
 
 # Environment/Secrets
 .env
+credential.env
+credentials/
+*.key.json
 *.pem
 key.json
 

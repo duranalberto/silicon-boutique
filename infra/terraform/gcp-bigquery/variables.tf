@@ -77,3 +77,17 @@ variable "dataset_location" {
     error_message = "dataset_location must be a non-empty BigQuery location value."
   }
 }
+
+variable "summary_writer_service_accounts" {
+  description = "Service account emails allowed to run benchmark summary load jobs against the durable BigQuery dataset."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for service_account in var.summary_writer_service_accounts :
+      can(regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.iam\\.gserviceaccount\\.com$", service_account))
+    ])
+    error_message = "summary_writer_service_accounts must contain service account email addresses, without the serviceAccount: prefix."
+  }
+}

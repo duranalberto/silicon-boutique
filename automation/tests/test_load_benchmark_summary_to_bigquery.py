@@ -22,23 +22,43 @@ spec.loader.exec_module(loader)
 
 
 class FakeRunner:
-    def __init__(self, *, schema, duplicate_rows=None, fail_show=False):
+    def __init__(
+        self,
+        *,
+        schema,
+        duplicate_rows=None,
+        fail_show=False,
+        fail_load=False,
+        fail_delete=False,
+        show_stdout=None,
+    ):
         self.schema = schema
         self.duplicate_rows = duplicate_rows or []
         self.fail_show = fail_show
+        self.fail_load = fail_load
+        self.fail_delete = fail_delete
+        self.show_stdout = show_stdout
         self.commands = []
 
     def __call__(self, command):
         self.commands.append(command)
-        if command[:2] == ["bq", "show"]:
+        if "show" in command:
             if self.fail_show:
                 return loader.CommandResult(1, "", "access denied")
+            if self.show_stdout is not None:
+                return loader.CommandResult(0, self.show_stdout, "")
             return loader.CommandResult(
                 0, json.dumps({"schema": {"fields": self.schema}}), ""
             )
-        if command[:2] == ["bq", "query"]:
+        if "query" in command:
             return loader.CommandResult(0, json.dumps(self.duplicate_rows), "")
-        if command[:2] == ["bq", "load"]:
+        if "load" in command:
+            if self.fail_load:
+                return loader.CommandResult(1, "", "tables.create denied")
+            return loader.CommandResult(0, "", "")
+        if "rm" in command:
+            if self.fail_delete:
+                return loader.CommandResult(1, "", "delete denied")
             return loader.CommandResult(0, "", "")
         return loader.CommandResult(1, "", "unexpected command")
 
@@ -121,6 +141,13 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
                 expected_schema=self.load_schema(),
                 runner=runner,
             )
+            loader.validate_query_access(
+                project_id="example-project",
+                dataset_id="silicon_boutique",
+                table_id="benchmark_summaries",
+                location="US",
+                runner=runner,
+            )
             duplicate_run_ids = loader.existing_run_ids(
                 project_id="example-project",
                 dataset_id="silicon_boutique",
@@ -140,12 +167,17 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             )
 
             self.assertEqual(duplicate_run_ids, set())
-            self.assertEqual(runner.commands[0][:4], ["bq", "show", "--format=json", "--project_id"])
+            self.assertEqual(runner.commands[0][:4], ["bq", "--format=json", "--project_id", "example-project"])
+            self.assertEqual(runner.commands[0][4], "show")
             self.assertIn("example-project:silicon_boutique.benchmark_summaries", runner.commands[0])
-            self.assertEqual(runner.commands[1][:3], ["bq", "query", "--nouse_legacy_sql"])
-            self.assertIn("WHERE run_id IN ('test-run')", runner.commands[1][-1])
-            self.assertEqual(runner.commands[2][:2], ["bq", "load"])
-            self.assertIn("--source_format=NEWLINE_DELIMITED_JSON", runner.commands[2])
+            self.assertEqual(runner.commands[1][:4], ["bq", "--format=json", "--project_id", "example-project"])
+            self.assertEqual(runner.commands[1][6:8], ["query", "--nouse_legacy_sql"])
+            self.assertIn("WHERE FALSE LIMIT 0", runner.commands[1][-1])
+            self.assertEqual(runner.commands[2][:4], ["bq", "--format=json", "--project_id", "example-project"])
+            self.assertIn("WHERE run_id IN ('test-run')", runner.commands[2][-1])
+            self.assertEqual(runner.commands[3][:5], ["bq", "--project_id", "example-project", "--location", "US"])
+            self.assertEqual(runner.commands[3][5], "load")
+            self.assertIn("--source_format=NEWLINE_DELIMITED_JSON", runner.commands[3])
 
     def test_duplicate_run_id_is_detected_before_load(self):
         runner = FakeRunner(
@@ -195,7 +227,69 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(result, 2)
             self.assertEqual(payload["status"], "failed")
+            self.assertEqual(payload["stage"], "bq_show_schema")
             self.assertIn("failed to inspect BigQuery table", payload["error"])
+            self.assertEqual(payload["diagnostics"]["returncode"], 1)
+            self.assertIn("access denied", payload["diagnostics"]["stderr_preview"])
+
+    def test_main_reports_non_json_table_inspection_with_preview(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
+            report = Path(tmpdir) / "bigquery-load-report.json"
+            write_store(summary_store, [valid_summary()])
+            runner = FakeRunner(
+                schema=self.load_schema(),
+                show_stdout="Welcome to bq\ncredential=/tmp/gha-creds-secret.json",
+            )
+            argv = [
+                "load_benchmark_summary_to_bigquery.py",
+                "--summary-store",
+                str(summary_store),
+                "--project-id",
+                "example-project",
+                "--dataset-id",
+                "silicon_boutique",
+                "--table-id",
+                "benchmark_summaries",
+                "--location",
+                "US",
+                "--schema",
+                str(BIGQUERY_SCHEMA),
+                "--load-report-output",
+                str(report),
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                loader, "run_bq", runner
+            ), mock.patch.object(sys, "stderr", io.StringIO()):
+                result = loader.main()
+
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(result, 2)
+            self.assertEqual(payload["status"], "failed")
+            self.assertEqual(payload["stage"], "bq_show_schema")
+            self.assertIn("did not return valid JSON", payload["error"])
+            self.assertIn("Welcome to bq", payload["diagnostics"]["stdout_preview"])
+            self.assertNotIn("secret", payload["diagnostics"]["stdout_preview"])
+
+    def test_table_inspection_allows_warning_prefix_before_json(self):
+        runner = FakeRunner(
+            schema=self.load_schema(),
+            show_stdout=(
+                "WARNING: BigQuery CLI emitted a startup warning\n"
+                + json.dumps({"schema": {"fields": self.load_schema()}})
+            ),
+        )
+
+        loader.validate_table_schema(
+            project_id="example-project",
+            dataset_id="silicon_boutique",
+            table_id="benchmark_summaries",
+            expected_schema=self.load_schema(),
+            runner=runner,
+        )
+
+        self.assertEqual(len(runner.commands), 1)
 
     def test_dry_run_validates_without_load_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -230,7 +324,7 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(result, 0)
             self.assertEqual(payload["status"], "validated")
-            self.assertFalse(any(command[:2] == ["bq", "load"] for command in runner.commands))
+            self.assertFalse(any("load" in command for command in runner.commands))
 
     def test_multi_row_store_requires_run_id_selection(self):
         rows = [valid_summary("run-a"), valid_summary("run-b")]
@@ -289,7 +383,147 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(payload["status"], "loaded")
             self.assertEqual(payload["run_ids"], ["test-run"])
-            self.assertTrue(any(command[:2] == ["bq", "load"] for command in runner.commands))
+            self.assertTrue(any("load" in command for command in runner.commands))
+
+    def test_preflight_only_validates_destination_without_summary_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = Path(tmpdir) / "bigquery-load-report.json"
+            runner = FakeRunner(schema=self.load_schema())
+            argv = [
+                "load_benchmark_summary_to_bigquery.py",
+                "--project-id",
+                "example-project",
+                "--dataset-id",
+                "silicon_boutique",
+                "--table-id",
+                "benchmark_summaries",
+                "--location",
+                "US",
+                "--schema",
+                str(BIGQUERY_SCHEMA),
+                "--load-report-output",
+                str(report),
+                "--preflight-only",
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                loader, "run_bq", runner
+            ):
+                result = loader.main()
+
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["status"], "validated")
+            self.assertEqual(payload["stage"], "preflight")
+            self.assertEqual(len(runner.commands), 2)
+            self.assertTrue(all("load" not in command for command in runner.commands))
+
+    def test_preflight_write_probe_loads_and_deletes_scratch_table(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = Path(tmpdir) / "bigquery-load-report.json"
+            runner = FakeRunner(schema=self.load_schema())
+            argv = [
+                "load_benchmark_summary_to_bigquery.py",
+                "--project-id",
+                "example-project",
+                "--dataset-id",
+                "silicon_boutique",
+                "--table-id",
+                "benchmark_summaries",
+                "--location",
+                "US",
+                "--schema",
+                str(BIGQUERY_SCHEMA),
+                "--load-report-output",
+                str(report),
+                "--run-id",
+                "gha-123-1",
+                "--preflight-write-probe",
+                "--preflight-only",
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                loader, "run_bq", runner
+            ):
+                result = loader.main()
+
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["status"], "validated")
+            self.assertTrue(payload["preflight_write_probe"])
+            self.assertEqual(payload["preflight_scratch_table_id"], "sb_preflight_gha_123_1")
+            self.assertEqual(len(runner.commands), 4)
+            self.assertEqual(runner.commands[2][5], "load")
+            self.assertIn(
+                "example-project:silicon_boutique.sb_preflight_gha_123_1",
+                runner.commands[2],
+            )
+            self.assertEqual(runner.commands[3][3:6], ["rm", "-f", "-t"])
+            self.assertIn(
+                "example-project:silicon_boutique.sb_preflight_gha_123_1",
+                runner.commands[3],
+            )
+
+    def test_preflight_write_probe_reports_load_permission_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = Path(tmpdir) / "bigquery-load-report.json"
+            runner = FakeRunner(schema=self.load_schema(), fail_load=True)
+            argv = [
+                "load_benchmark_summary_to_bigquery.py",
+                "--project-id",
+                "example-project",
+                "--dataset-id",
+                "silicon_boutique",
+                "--table-id",
+                "benchmark_summaries",
+                "--location",
+                "US",
+                "--schema",
+                str(BIGQUERY_SCHEMA),
+                "--load-report-output",
+                str(report),
+                "--run-id",
+                "gha-123-1",
+                "--preflight-write-probe",
+                "--preflight-only",
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                loader, "run_bq", runner
+            ), mock.patch.object(sys, "stderr", io.StringIO()):
+                result = loader.main()
+
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(result, 2)
+            self.assertEqual(payload["status"], "failed")
+            self.assertEqual(payload["stage"], "bq_preflight_write_probe")
+            self.assertIn("failed to load BigQuery preflight write probe rows", payload["error"])
+            self.assertIn("tables.create denied", payload["diagnostics"]["stderr_preview"])
+            self.assertEqual(
+                payload["diagnostics"]["scratch_table_id"],
+                "sb_preflight_gha_123_1",
+            )
+            self.assertTrue(any("rm" in command for command in runner.commands))
+
+    def test_preflight_write_probe_reports_cleanup_failure(self):
+        runner = FakeRunner(schema=self.load_schema(), fail_delete=True)
+
+        with self.assertRaises(loader.BigQueryLoadError) as context:
+            loader.preflight_write_probe(
+                project_id="example-project",
+                dataset_id="silicon_boutique",
+                location="US",
+                schema=BIGQUERY_SCHEMA,
+                run_id="gha-123-1",
+                runner=runner,
+            )
+
+        self.assertEqual(context.exception.stage, "bq_preflight_cleanup")
+        self.assertEqual(
+            context.exception.diagnostics["scratch_table_id"],
+            "sb_preflight_gha_123_1",
+        )
+        self.assertEqual(runner.commands[-1][3:6], ["rm", "-f", "-t"])
 
 
 if __name__ == "__main__":

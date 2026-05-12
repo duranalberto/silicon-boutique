@@ -129,8 +129,8 @@ class BigQueryHistoryTest(unittest.TestCase):
         self.assertEqual(results[0].missing_metrics, ())
         self.assertIsNone(results[1].cost_per_1m_requests_usd)
         command = runner.commands[0]
-        self.assertEqual(command[:5], ["bq", "query", "--nouse_legacy_sql", "--format=json", "--project_id"])
-        self.assertEqual(command[-2], "US")
+        self.assertEqual(command[:4], ["bq", "--format=json", "--project_id", "example-project"])
+        self.assertEqual(command[4:8], ["--location", "US", "query", "--nouse_legacy_sql"])
 
     def test_query_historical_metrics_returns_empty_results(self):
         store = BigQueryHistoryStore(self.config(), FakeRunner([]))

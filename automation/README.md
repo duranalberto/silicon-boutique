@@ -9,16 +9,44 @@ Current subdirectories:
 
 ## Local Benchmark Orchestration
 
-`scripts/run_local_benchmark.py` runs the local Kubernetes benchmark flow without GitHub Actions. It provisions the Terraform-owned namespace, deploys the workload and monitoring charts, restarts the load generator for the measured window, extracts Prometheus metrics, generates and validates the summary, writes workflow-shaped trace artifacts, and tears the namespace down.
+`scripts/run_local_benchmark_workflow.py` is the recommended one-command local
+workflow. It verifies the local toolchain, starts or repairs the managed
+`siliconboutique` minikube profile when needed, preflights BigQuery, runs a
+short local benchmark with BigQuery persistence enabled, validates the remote
+BigQuery row, and writes run-scoped debug logs.
+
+```bash
+python3 automation/scripts/run_local_benchmark_workflow.py
+```
+
+Artifacts are written to `artifacts/local-workflow/<run-id>/`, including
+`local-workflow-report.json`, `workflow.log`, per-command logs under
+`commands/`, and `issue-report.json` when a workflow step fails. Use
+`--full-duration` for the normal benchmark duration instead of the default
+smoke settings, or `--run-id` to choose a DNS-safe run ID.
+
+`scripts/run_local_benchmark.py` remains the lower-level orchestration
+entrypoint for advanced/debug use. It provisions the Terraform-owned namespace,
+deploys the workload and monitoring charts, restarts the load generator for the
+measured window, extracts Prometheus metrics, generates and validates the
+summary, writes workflow-shaped trace artifacts, and tears the namespace down.
+Use `--skip-destroy` only for deliberate debugging.
 
 ```bash
 python3 automation/scripts/run_local_benchmark.py \
   --run-id local-smoke \
   --test-duration 2m \
-  --min-duration-seconds 60
+  --min-duration-seconds 60 \
+  --persist-bigquery \
+  --bigquery-env-file credential.env
 ```
 
-Use `--skip-destroy` only for debugging a local run; the default path cleans up the Terraform-owned namespace.
+Local BigQuery persistence stores the canonical `BenchmarkSummary` row in
+BigQuery, not raw Prometheus time-series samples. Copy
+`credential.env.example` to the ignored `credential.env`, set `PROJECT_ID` and
+`BIGQUERY_*`, and authenticate with Application Default Credentials or an
+ignored `GOOGLE_APPLICATION_CREDENTIALS` key path before running either local
+workflow.
 
 ## Acceptance Demo
 
@@ -98,10 +126,12 @@ python3 automation/scripts/generate_benchmark_summary.py \
   --concurrent-users "$concurrent_users" \
   --users-per-second "$users_per_second" \
   --load-profile-source manual \
+  --min-coverage-ratio 0.95 \
   --strict
 ```
 
 For priced GCP runs, also pass `--region`, `--zone`, `--pricing-model`, optional `--cpu-platform`, and `--pricing-table automation/templates/machine-pricing.json`. The summary calculates `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` from successful request count, node count, duration, and hourly node price. Strict summary validation rejects impossible CPU utilization values and records both average and max utilization.
+`summary_status=complete` requires required metrics and derived fields plus coverage at or above the configured minimum; the default `--min-coverage-ratio 0.95` matches the comparability validator.
 
 The local summary store fails on duplicate `run_id` values by default. Use `--replace` only when intentionally regenerating a summary for the same benchmark run.
 
@@ -119,18 +149,30 @@ python3 automation/scripts/generate_comparison_report.py \
 
 The JSON report is the canonical machine-readable output. The Markdown report contains a compact table for humans. Both outputs group repeated runs by normalized provider, machine, processor, pricing, and load-profile metadata; rank latency, throughput, memory, CPU efficiency, cost, and run quality; and list rejected non-comparable runs instead of silently dropping them.
 
-Use BigQuery source mode for durable history:
+## Portable Metrics Dashboard
+
+Generate and serve a local HTML dashboard from the default local summary store:
 
 ```bash
-python3 automation/scripts/generate_comparison_report.py \
+python3 automation/scripts/launch_metrics_dashboard.py --no-browser
+```
+
+The launcher reads `artifacts/benchmark-summaries.ndjson`, reuses the comparison report grouping, ranking, warning, and rejected-run behavior, writes `artifacts/dashboard/index.html` and `artifacts/dashboard/dashboard-data.json`, and prints a localhost URL. The dashboard data includes source metadata with `type=ndjson`, latest-run metadata, comparison groups, rankings, rejected runs, and duplicate `run_id` hints.
+
+Use BigQuery dashboard source mode for durable cloud history:
+
+```bash
+python3 automation/scripts/launch_metrics_dashboard.py \
   --project-id "$project_id" \
   --dataset-id silicon_boutique \
   --table-id benchmark_summaries \
   --location US \
-  --schema automation/templates/benchmark-summary.schema.json \
-  --report-output artifacts/comparison-report.json \
-  --markdown-output artifacts/comparison-report.md
+  --no-browser
 ```
+
+BigQuery mode requires local `bq` CLI access with credentials and permissions for the configured project, dataset, and table. Use `--no-serve` when you only want to regenerate the files without starting the local HTTP server. Use `--limit`, `--machine-type`, `--processor-family`, `--architecture`, `--cloud-provider`, or `--pricing-model` to narrow either local or BigQuery source data before the dashboard is generated.
+
+Dashboard files are ignored generated artifacts, not canonical project documentation. This portable dashboard visualizes stored benchmark summaries after a run; it is distinct from the private Grafana dashboard used for live Kubernetes monitoring during a benchmark.
 
 ## Load Calibration
 

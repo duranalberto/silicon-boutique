@@ -490,6 +490,7 @@ jobs:
             --concurrent-users "$CONCURRENT_USERS" \
             --users-per-second "$USERS_PER_SECOND" \
             --load-profile-source "$LOAD_PROFILE_SOURCE" \
+            --min-coverage-ratio 0.95 \
             --strict
 
       - name: Validate benchmark summary

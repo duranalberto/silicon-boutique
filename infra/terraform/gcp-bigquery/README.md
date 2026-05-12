@@ -16,11 +16,13 @@ Apply only after confirming the project, credentials, dataset location, and rete
 ```bash
 timeout 10m terraform plan -input=false \
   -var='project_id=<project-id>' \
+  -var='summary_writer_service_accounts=["<github-actions-service-account>@<project-id>.iam.gserviceaccount.com"]' \
   -var='static_validation_mode=false'
 
 timeout 10m terraform apply -auto-approve \
   -var='project_id=<project-id>' \
+  -var='summary_writer_service_accounts=["<github-actions-service-account>@<project-id>.iam.gserviceaccount.com"]' \
   -var='static_validation_mode=false'
 ```
 
-The default destination is `<project-id>.silicon_boutique.benchmark_summaries` in location `US`. These resources are not run-scoped, do not carry teardown labels, and should not be destroyed as part of benchmark cleanup.
+The default destination is `<project-id>.silicon_boutique.benchmark_summaries` in location `US`. When `summary_writer_service_accounts` is set, Terraform grants each service account `roles/bigquery.jobUser` on the project and `roles/bigquery.dataEditor` on the durable dataset so the benchmark workflow can run load jobs and write the summary table. These resources are not run-scoped, do not carry teardown labels, and should not be destroyed as part of benchmark cleanup.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -23,16 +24,28 @@ from silicon_boutique_shared.automation import write_json
 class BigQueryLoadError(RuntimeError):
     """Raised when a benchmark summary cannot be loaded safely."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str = "validation",
+        diagnostics: dict[str, Any] | None = None,
+    ):
+        super().__init__(message)
+        self.stage = stage
+        self.diagnostics = diagnostics or {}
+
 
 CommandResult = bq_helpers.CommandResult
 Runner = bq_helpers.Runner
+PREVIEW_LIMIT = 600
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Load BenchmarkSummary NDJSON rows into BigQuery."
     )
-    parser.add_argument("--summary-store", type=Path, required=True)
+    parser.add_argument("--summary-store", type=Path)
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--table-id", required=True)
@@ -54,15 +67,28 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate the input, destination table, schema, and duplicate status without loading rows.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate the destination table, schema, and query access without reading or loading summaries.",
+    )
+    parser.add_argument(
+        "--preflight-write-probe",
+        action="store_true",
+        help="During --preflight-only, load and delete a run-scoped scratch table to verify BigQuery write permissions.",
+    )
+    args = parser.parse_args()
+    if args.preflight_write_probe and not args.preflight_only:
+        parser.error("--preflight-write-probe requires --preflight-only")
+    if not args.preflight_only and args.summary_store is None:
+        parser.error("--summary-store is required unless --preflight-only is set")
+    return args
 
 
 def main() -> int:
     args = parse_args()
     report: dict[str, Any] = base_report(args)
     try:
-        rows = read_summary_rows(args.summary_store)
-        selected_rows = select_rows(rows, args.run_id)
         schema = load_bigquery_schema(args.schema)
         validate_destination(args.project_id, args.dataset_id, args.table_id, args.location)
         validate_table_schema(
@@ -72,6 +98,36 @@ def main() -> int:
             expected_schema=schema,
             runner=run_bq,
         )
+        validate_query_access(
+            project_id=args.project_id,
+            dataset_id=args.dataset_id,
+            table_id=args.table_id,
+            location=args.location,
+            runner=run_bq,
+        )
+        if args.preflight_only:
+            scratch_table_id = None
+            if args.preflight_write_probe:
+                scratch_table_id = preflight_write_probe(
+                    project_id=args.project_id,
+                    dataset_id=args.dataset_id,
+                    location=args.location,
+                    schema=args.schema,
+                    run_id=args.run_id,
+                    runner=run_bq,
+                )
+            report.update(
+                {
+                    "status": "validated",
+                    "stage": "preflight",
+                    "preflight_write_probe": args.preflight_write_probe,
+                    "preflight_scratch_table_id": scratch_table_id,
+                }
+            )
+            write_json(args.load_report_output, report)
+            return 0
+        rows = read_summary_rows(args.summary_store)
+        selected_rows = select_rows(rows, args.run_id)
         duplicate_run_ids = existing_run_ids(
             project_id=args.project_id,
             dataset_id=args.dataset_id,
@@ -98,15 +154,23 @@ def main() -> int:
         report.update(
             {
                 "status": "validated" if args.dry_run else "loaded",
+                "stage": "complete",
                 "row_count": len(selected_rows),
                 "run_ids": [row["run_id"] for row in selected_rows],
             }
         )
         write_json(args.load_report_output, report)
     except BigQueryLoadError as exc:
-        report.update({"status": "failed", "error": str(exc)})
+        report.update(
+            {
+                "status": "failed",
+                "stage": exc.stage,
+                "error": str(exc),
+                "diagnostics": exc.diagnostics,
+            }
+        )
         write_json(args.load_report_output, report)
-        print(str(exc), file=sys.stderr)
+        print(format_load_error(exc), file=sys.stderr)
         return 2
     return 0
 
@@ -123,9 +187,14 @@ def base_report(args: argparse.Namespace) -> dict[str, Any]:
         "schema": str(args.schema),
         "duplicate_policy": args.duplicate_policy,
         "dry_run": args.dry_run,
+        "preflight_only": args.preflight_only,
+        "preflight_write_probe": args.preflight_write_probe,
+        "preflight_scratch_table_id": None,
+        "stage": "pending",
         "row_count": 0,
         "run_ids": [],
         "error": None,
+        "diagnostics": {},
     }
 
 
@@ -205,31 +274,53 @@ def validate_table_schema(
     runner: Runner,
 ) -> None:
     result = runner(
-        [
-            "bq",
-            "show",
-            "--format=json",
-            "--project_id",
-            project_id,
-            table_ref(project_id, dataset_id, table_id),
-        ]
+        bq_helpers.show_table_command(project_id, dataset_id, table_id)
     )
     if result.returncode != 0:
         raise BigQueryLoadError(
             "failed to inspect BigQuery table "
-            f"{table_sql_name(project_id, dataset_id, table_id)}: {result.stderr.strip()}"
+            f"{table_sql_name(project_id, dataset_id, table_id)}",
+            stage="bq_show_schema",
+            diagnostics=command_diagnostics(result),
         )
-    try:
-        table = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise BigQueryLoadError("bq show did not return valid JSON") from exc
+    table = parse_bq_json_object(result, stage="bq_show_schema", label="bq show")
     actual_fields = table.get("schema", {}).get("fields")
     if not isinstance(actual_fields, list):
-        raise BigQueryLoadError("bq show response did not include schema.fields")
+        raise BigQueryLoadError(
+            "bq show response did not include schema.fields",
+            stage="bq_show_schema",
+            diagnostics=command_diagnostics(result),
+        )
     expected = schema_signature(expected_schema)
     actual = schema_signature(actual_fields)
     if actual != expected:
-        raise BigQueryLoadError("BigQuery table schema does not match benchmark summary schema")
+        raise BigQueryLoadError(
+            "BigQuery table schema does not match benchmark summary schema",
+            stage="bq_show_schema",
+        )
+
+
+def validate_query_access(
+    *,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    location: str,
+    runner: Runner,
+) -> None:
+    query = (
+        "SELECT run_id FROM "
+        f"`{table_sql_name(project_id, dataset_id, table_id)}` "
+        "WHERE FALSE LIMIT 0"
+    )
+    result = runner(bq_helpers.query_command(project_id, location, query))
+    if result.returncode != 0:
+        raise BigQueryLoadError(
+            "failed to run BigQuery preflight query",
+            stage="bq_preflight_query",
+            diagnostics=command_diagnostics(result),
+        )
+    parse_bq_json_array(result, stage="bq_preflight_query", label="bq preflight query")
 
 
 def existing_run_ids(
@@ -248,26 +339,15 @@ def existing_run_ids(
         f"WHERE run_id IN ({run_id_literals})"
     )
     result = runner(
-        [
-            "bq",
-            "query",
-            "--nouse_legacy_sql",
-            "--format=json",
-            "--project_id",
-            project_id,
-            "--location",
-            location,
-            query,
-        ]
+        bq_helpers.query_command(project_id, location, query)
     )
     if result.returncode != 0:
         raise BigQueryLoadError(
-            "failed to query existing BigQuery run IDs: " + result.stderr.strip()
+            "failed to query existing BigQuery run IDs",
+            stage="bq_duplicate_query",
+            diagnostics=command_diagnostics(result),
         )
-    try:
-        rows = bq_helpers.parse_bq_json_array(result.stdout)
-    except bq_helpers.BigQueryHelperError as exc:
-        raise BigQueryLoadError(str(exc)) from exc
+    rows = parse_bq_json_array(result, stage="bq_duplicate_query", label="bq duplicate query")
     return {
         row["run_id"]
         for row in rows
@@ -290,21 +370,206 @@ def load_rows(
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
         handle.flush()
         result = runner(
-            [
-                "bq",
-                "load",
-                "--source_format=NEWLINE_DELIMITED_JSON",
-                "--project_id",
+            bq_helpers.load_command(
                 project_id,
-                "--location",
+                dataset_id,
+                table_id,
                 location,
-                table_ref(project_id, dataset_id, table_id),
                 handle.name,
                 str(schema),
-            ]
+            )
         )
     if result.returncode != 0:
-        raise BigQueryLoadError("failed to load BigQuery summary rows: " + result.stderr.strip())
+        raise BigQueryLoadError(
+            "failed to load BigQuery summary rows",
+            stage="bq_load",
+            diagnostics=command_diagnostics(result),
+        )
+
+
+def preflight_write_probe(
+    *,
+    project_id: str,
+    dataset_id: str,
+    location: str,
+    schema: Path,
+    run_id: str | None,
+    runner: Runner,
+) -> str:
+    scratch_table_id = preflight_scratch_table_id(run_id)
+    probe_row = preflight_probe_row(run_id)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".ndjson") as handle:
+        handle.write(json.dumps(probe_row, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        load_result = runner(
+            bq_helpers.load_command(
+                project_id,
+                dataset_id,
+                scratch_table_id,
+                location,
+                handle.name,
+                str(schema),
+            )
+        )
+    cleanup_result = runner(
+        bq_helpers.delete_table_command(project_id, dataset_id, scratch_table_id)
+    )
+    if load_result.returncode != 0:
+        raise BigQueryLoadError(
+            "failed to load BigQuery preflight write probe rows",
+            stage="bq_preflight_write_probe",
+            diagnostics={
+                **command_diagnostics(load_result),
+                "scratch_table_id": scratch_table_id,
+                "cleanup": command_diagnostics(cleanup_result),
+            },
+        )
+    if cleanup_result.returncode != 0:
+        raise BigQueryLoadError(
+            "failed to delete BigQuery preflight scratch table",
+            stage="bq_preflight_cleanup",
+            diagnostics={
+                **command_diagnostics(cleanup_result),
+                "scratch_table_id": scratch_table_id,
+            },
+        )
+    return scratch_table_id
+
+
+def preflight_scratch_table_id(run_id: str | None) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9_]+", "_", (run_id or "manual").strip()).strip("_")
+    if not suffix:
+        suffix = "manual"
+    return ("sb_preflight_" + suffix.lower())[:1024]
+
+
+def preflight_probe_row(run_id: str | None) -> dict[str, Any]:
+    probe_run_id = run_id or "manual"
+    timestamp = "2026-01-01T00:00:00Z"
+    return {
+        "run_id": f"{probe_run_id}-preflight",
+        "namespace": probe_run_id,
+        "environment": "preflight",
+        "cloud_provider": "gcp",
+        "region": "preflight",
+        "zone": "preflight",
+        "machine_type": "preflight",
+        "processor_family": "preflight",
+        "architecture": "x86_64",
+        "node_count": 1,
+        "pricing_model": "preflight",
+        "benchmark_start": timestamp,
+        "benchmark_end": timestamp,
+        "duration_seconds": 1,
+        "generated_at": timestamp,
+        "missing_metrics": [],
+        "empty_metrics": [],
+        "summary_status": "preflight",
+    }
+
+
+def parse_bq_json_object(
+    result: CommandResult,
+    *,
+    stage: str,
+    label: str,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(bq_json_stdout(result.stdout, fallback="{}"))
+    except json.JSONDecodeError as exc:
+        raise BigQueryLoadError(
+            f"{label} did not return valid JSON",
+            stage=stage,
+            diagnostics=command_diagnostics(result),
+        ) from exc
+    if not isinstance(payload, dict):
+        raise BigQueryLoadError(
+            f"{label} did not return a JSON object",
+            stage=stage,
+            diagnostics=command_diagnostics(result),
+        )
+    return payload
+
+
+def parse_bq_json_array(
+    result: CommandResult,
+    *,
+    stage: str,
+    label: str,
+) -> list[dict[str, Any]]:
+    try:
+        return bq_helpers.parse_bq_json_array(
+            bq_json_stdout(result.stdout, fallback="[]"),
+            label=label,
+        )
+    except bq_helpers.BigQueryHelperError as exc:
+        raise BigQueryLoadError(
+            str(exc),
+            stage=stage,
+            diagnostics=command_diagnostics(result),
+        ) from exc
+
+
+def command_diagnostics(result: CommandResult) -> dict[str, Any]:
+    return {
+        "returncode": result.returncode,
+        "stdout_preview": preview_text(result.stdout),
+        "stderr_preview": preview_text(result.stderr),
+    }
+
+
+def format_load_error(exc: BigQueryLoadError) -> str:
+    lines = [str(exc)]
+    if exc.stage:
+        lines.append(f"stage: {exc.stage}")
+    stdout_preview = exc.diagnostics.get("stdout_preview")
+    stderr_preview = exc.diagnostics.get("stderr_preview")
+    if stdout_preview:
+        lines.append(f"stdout: {stdout_preview}")
+    if stderr_preview:
+        lines.append(f"stderr: {stderr_preview}")
+    return "\n".join(lines)
+
+
+def bq_json_stdout(value: str, *, fallback: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return fallback
+    if text[0] in "[{":
+        return text
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            prefix = "\n".join(lines[:index]).strip()
+            if prefix and not all(is_ignorable_bq_stdout_line(item) for item in lines[:index]):
+                break
+            return "\n".join(lines[index:]).strip()
+    return text
+
+
+def is_ignorable_bq_stdout_line(value: str) -> bool:
+    stripped = value.strip()
+    return not stripped or stripped.startswith(("WARNING:", "WARN:", "INFO:"))
+
+
+def preview_text(value: str) -> str:
+    text = redact_diagnostic_text(value or "").strip()
+    if len(text) <= PREVIEW_LIMIT:
+        return text
+    return text[:PREVIEW_LIMIT] + "...<truncated>"
+
+
+def redact_diagnostic_text(value: str) -> str:
+    patterns = [
+        (r"(?i)(authorization:\s*)(bearer|basic)\s+\S+", r"\1<redacted>"),
+        (r"(?i)((?:token|secret|password|credential)[A-Za-z0-9_ -]*[=:]\s*)\S+", r"\1<redacted>"),
+        (r"gha-creds-[A-Za-z0-9._-]+\.json", "gha-creds-<redacted>.json"),
+    ]
+    redacted = value
+    for pattern, replacement in patterns:
+        redacted = re.sub(pattern, replacement, redacted)
+    return redacted
 
 
 def schema_signature(fields: list[dict[str, Any]]) -> list[tuple[str, str, str]]:

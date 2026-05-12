@@ -281,6 +281,17 @@ class AcceptanceDemoTest(unittest.TestCase):
         self.assertIn("acceptance-demo-report.json", workflow)
         self.assertIn("run_acceptance_demo.py", workflow)
 
+    def test_workflow_preflights_bigquery_before_provisioning(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        preflight_index = workflow.index("name: Preflight BigQuery destination")
+        provision_index = workflow.index("name: Provision GKE benchmark environment")
+        self.assertLess(preflight_index, provision_index)
+        self.assertIn("--preflight-only", workflow)
+        self.assertIn("--load-profile-source \"$LOAD_PROFILE_SOURCE\" \\\n            --min-coverage-ratio 0.95", workflow)
+        self.assertIn('--min-duration-seconds "$TEST_DURATION_SECONDS"', workflow)
+        self.assertNotIn("--min-duration-seconds 1200", workflow)
+
 
 def run_demo(tmpdir, *extra_args, runner=None):
     args = run_acceptance_demo.parse_args(

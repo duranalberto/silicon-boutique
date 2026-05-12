@@ -1,17 +1,20 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from automation.scripts import run_local_benchmark
 
 
 class FakeRunner:
-    def __init__(self, *, fail_commands=None):
+    def __init__(self, *, fail_commands=None, fail_bigquery_load=False):
         self.commands = []
         self.fail_commands = fail_commands or {}
+        self.fail_bigquery_load = fail_bigquery_load
 
     def run(
         self,
@@ -50,6 +53,23 @@ class FakeRunner:
             return run_local_benchmark.CommandResult(0, json.dumps(terraform_outputs()))
         if rendered[:2] == ["curl", "-fsS"]:
             return run_local_benchmark.CommandResult(0, "ready")
+        if any(part.endswith("load_benchmark_summary_to_bigquery.py") for part in rendered):
+            if self.fail_bigquery_load and "--preflight-only" not in rendered:
+                return run_local_benchmark.CommandResult(2, "", "load failed")
+            if "--load-report-output" in rendered:
+                report = Path(rendered[rendered.index("--load-report-output") + 1])
+                report.parent.mkdir(parents=True, exist_ok=True)
+                status = "validated" if "--preflight-only" in rendered else "loaded"
+                report.write_text(
+                    json.dumps(
+                        {
+                            "status": status,
+                            "summary_table": "example-project.silicon_boutique.benchmark_summaries",
+                            "run_ids": [] if "--preflight-only" in rendered else ["local-test"],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
         return run_local_benchmark.CommandResult(0, "", "")
 
 
@@ -103,8 +123,16 @@ class RunLocalBenchmarkTest(unittest.TestCase):
                 for command in commands
                 if "automation/scripts/validate_benchmark_comparability.py" in command
             ]
+            generator_commands = [
+                command
+                for command in commands
+                if "automation/scripts/generate_benchmark_summary.py" in command
+            ]
             self.assertEqual(len(validator_commands), 1)
+            self.assertEqual(len(generator_commands), 1)
             self.assertIn("--run-id local-test", validator_commands[0])
+            self.assertIn("--min-coverage-ratio 0.95", generator_commands[0])
+            self.assertIn("--min-coverage-ratio 0.95", validator_commands[0])
             self.assertCommandOrder(
                 commands,
                 [
@@ -136,13 +164,14 @@ class RunLocalBenchmarkTest(unittest.TestCase):
             )
             self.assertEqual(
                 set(trace),
-                {"github", "benchmark", "gcp", "artifacts", "teardown", "inputs"},
+                {"github", "benchmark", "gcp", "bigquery", "artifacts", "teardown", "inputs"},
             )
             self.assertEqual(trace["benchmark"]["run_id"], "local-test")
             self.assertEqual(trace["benchmark"]["namespace"], "silicon-boutique-local-test")
             self.assertEqual(trace["artifacts"]["artifact_name"], "benchmark-local-local-test")
             self.assertEqual(trace["teardown"]["destroy_attempted"], "true")
             self.assertEqual(trace["teardown"]["destroy_succeeded"], "true")
+            self.assertEqual(trace["bigquery"]["persist_requested"], "false")
 
             for artifact in (
                 "provision-status.env",
@@ -188,6 +217,98 @@ class RunLocalBenchmarkTest(unittest.TestCase):
             self.assertEqual(config.concurrent_users, "64")
             self.assertEqual(config.users_per_second, "8.5")
             self.assertEqual(config.load_profile_source, "calibration")
+
+    def test_env_file_parsing_and_bigquery_config_resolution(self):
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(os.environ, {}, clear=True):
+            env_file = Path(tmpdir) / "credential.env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "PROJECT_ID=example-project",
+                        "BIGQUERY_DATASET=silicon_boutique",
+                        "BIGQUERY_TABLE=benchmark_summaries",
+                        "BIGQUERY_LOCATION=US",
+                        "GOOGLE_APPLICATION_CREDENTIALS=/tmp/local-key.json",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            args = run_local_benchmark.parse_args(
+                [
+                    "--persist-bigquery",
+                    "--bigquery-env-file",
+                    str(env_file),
+                ]
+            )
+            config = run_local_benchmark.config_from_args(args)
+
+            self.assertEqual(config.bigquery_project_id, "example-project")
+            self.assertEqual(config.bigquery_dataset, "silicon_boutique")
+            self.assertEqual(config.bigquery_table, "benchmark_summaries")
+            self.assertEqual(config.bigquery_location, "US")
+            self.assertEqual(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "/tmp/local-key.json")
+
+    def test_env_file_parse_errors_do_not_echo_secret_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / "credential.env"
+            env_file.write_text("not a valid secret-value line\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError) as context:
+                run_local_benchmark.read_env_file(env_file)
+
+            self.assertIn("line 1", str(context.exception))
+            self.assertNotIn("secret-value", str(context.exception))
+
+    def test_bigquery_cli_values_override_env_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(os.environ, {}, clear=True):
+            env_file = Path(tmpdir) / "credential.env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "PROJECT_ID=file-project",
+                        "BIGQUERY_DATASET=file_dataset",
+                        "BIGQUERY_TABLE=file_table",
+                        "BIGQUERY_LOCATION=EU",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            args = run_local_benchmark.parse_args(
+                [
+                    "--persist-bigquery",
+                    "--bigquery-env-file",
+                    str(env_file),
+                    "--bigquery-project-id",
+                    "cli-project",
+                    "--bigquery-dataset",
+                    "cli_dataset",
+                    "--bigquery-table",
+                    "cli_table",
+                    "--bigquery-location",
+                    "US",
+                ]
+            )
+            config = run_local_benchmark.config_from_args(args)
+
+            self.assertEqual(config.bigquery_project_id, "cli-project")
+            self.assertEqual(config.bigquery_dataset, "cli_dataset")
+            self.assertEqual(config.bigquery_table, "cli_table")
+            self.assertEqual(config.bigquery_location, "US")
+
+    def test_persist_bigquery_requires_resolved_destination(self):
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(os.environ, {}, clear=True):
+            missing_env_file = Path(tmpdir) / "missing.env"
+
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                run_local_benchmark.parse_args(
+                    [
+                        "--persist-bigquery",
+                        "--bigquery-env-file",
+                        str(missing_env_file),
+                    ]
+                )
 
     def test_controlled_failure_after_provision_still_runs_cleanup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -254,6 +375,59 @@ class RunLocalBenchmarkTest(unittest.TestCase):
             self.assertIn("minikube status --profile siliconboutique", commands)
             self.assertNotIn("terraform apply -auto-approve", commands)
 
+    def test_persist_bigquery_preflights_loads_and_writes_trace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            benchmark, runner = make_benchmark(tmpdir, persist_bigquery=True)
+
+            result = benchmark.run()
+
+            self.assertEqual(result, 0)
+            commands = command_strings(runner)
+            bigquery_commands = [
+                command
+                for command in commands
+                if "load_benchmark_summary_to_bigquery.py" in command
+            ]
+            self.assertEqual(len(bigquery_commands), 2)
+            self.assertIn("--preflight-only", bigquery_commands[0])
+            self.assertIn("--summary-store", bigquery_commands[1])
+            self.assertCommandOrder(
+                commands,
+                [
+                    "load_benchmark_summary_to_bigquery.py",
+                    "terraform init -input=false",
+                    "terraform apply -auto-approve",
+                    "automation/scripts/validate_benchmark_comparability.py",
+                    "load_benchmark_summary_to_bigquery.py",
+                    "helm uninstall sb-monitoring",
+                ],
+            )
+            trace = json.loads(
+                (Path(tmpdir) / "workflow-trace.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(trace["bigquery"]["persist_requested"], "true")
+            self.assertEqual(
+                trace["bigquery"]["summary_table"],
+                "example-project.silicon_boutique.benchmark_summaries",
+            )
+            self.assertEqual(trace["bigquery"]["load_report_exists"], "true")
+
+    def test_bigquery_load_failure_still_runs_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            benchmark, runner = make_benchmark(
+                tmpdir,
+                persist_bigquery=True,
+                runner=FakeRunner(fail_bigquery_load=True),
+            )
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                result = benchmark.run()
+
+            self.assertEqual(result, 2)
+            commands = "\n".join(command_strings(runner))
+            self.assertIn("load_benchmark_summary_to_bigquery.py", commands)
+            self.assertIn("terraform destroy -auto-approve", commands)
+
     def assertCommandOrder(self, commands, expected_prefixes):
         search_from = 0
         for expected in expected_prefixes:
@@ -265,7 +439,14 @@ class RunLocalBenchmarkTest(unittest.TestCase):
                 self.fail(f"missing command {expected!r} in {commands!r}")
 
 
-def make_benchmark(tmpdir, *, failure_stage="none", skip_destroy=False):
+def make_benchmark(
+    tmpdir,
+    *,
+    failure_stage="none",
+    skip_destroy=False,
+    persist_bigquery=False,
+    runner=None,
+):
     config = run_local_benchmark.BenchmarkConfig(
         run_id="local-test",
         artifacts_dir=Path(tmpdir),
@@ -292,8 +473,14 @@ def make_benchmark(tmpdir, *, failure_stage="none", skip_destroy=False):
         min_coverage_ratio=0.95,
         failure_stage=failure_stage,
         skip_destroy=skip_destroy,
+        persist_bigquery=persist_bigquery,
+        bigquery_env_file=None,
+        bigquery_project_id="example-project" if persist_bigquery else "",
+        bigquery_dataset="silicon_boutique" if persist_bigquery else "",
+        bigquery_table="benchmark_summaries" if persist_bigquery else "",
+        bigquery_location="US" if persist_bigquery else "",
     )
-    runner = FakeRunner()
+    runner = runner or FakeRunner()
     benchmark = run_local_benchmark.LocalBenchmark(
         config,
         runner=runner,

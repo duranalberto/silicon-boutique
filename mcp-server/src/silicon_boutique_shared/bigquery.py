@@ -50,6 +50,90 @@ def sql_string(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def show_table_command(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    *,
+    bq_command: str = "bq",
+) -> list[str]:
+    return [
+        bq_command,
+        "--format=json",
+        "--project_id",
+        project_id,
+        "show",
+        table_ref(project_id, dataset_id, table_id),
+    ]
+
+
+def query_command(
+    project_id: str,
+    location: str,
+    query: str,
+    *,
+    bq_command: str = "bq",
+    format_json: bool = True,
+) -> list[str]:
+    command = [bq_command]
+    if format_json:
+        command.append("--format=json")
+    command.extend(
+        [
+            "--project_id",
+            project_id,
+            "--location",
+            location,
+            "query",
+            "--nouse_legacy_sql",
+            query,
+        ]
+    )
+    return command
+
+
+def load_command(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    location: str,
+    source_path: str,
+    schema_path: str,
+    *,
+    bq_command: str = "bq",
+) -> list[str]:
+    return [
+        bq_command,
+        "--project_id",
+        project_id,
+        "--location",
+        location,
+        "load",
+        "--source_format=NEWLINE_DELIMITED_JSON",
+        table_ref(project_id, dataset_id, table_id),
+        source_path,
+        schema_path,
+    ]
+
+
+def delete_table_command(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    *,
+    bq_command: str = "bq",
+) -> list[str]:
+    return [
+        bq_command,
+        "--project_id",
+        project_id,
+        "rm",
+        "-f",
+        "-t",
+        table_ref(project_id, dataset_id, table_id),
+    ]
+
+
 def parse_bq_json_array(payload: str, *, label: str = "bq query") -> list[dict[str, Any]]:
     try:
         rows = json.loads(payload or "[]")

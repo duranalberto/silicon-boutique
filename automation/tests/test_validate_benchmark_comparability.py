@@ -207,6 +207,8 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(report["summary_validation_status"], "fail")
         self.assertIn("summary_status_not_complete", report["rejected_runs"][0]["reasons"])
+        self.assertIn("rejected runs:", result.stderr)
+        self.assertIn("- run-a: summary_status_not_complete", result.stderr)
 
     def test_short_duration_fails_quality_bar(self):
         row = self.valid_summary()

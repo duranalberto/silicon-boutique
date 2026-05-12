@@ -266,6 +266,51 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["summary_status"], "partial")
             self.assertIsNone(summary["frontend_latency_p99_ms"])
 
+    def test_coverage_above_minimum_is_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics_payload = self.make_metrics_payload()
+            metrics_payload["quality"]["coverage_ratio"] = 0.99
+
+            result, summary_output, _ = self.run_summary(
+                tmpdir,
+                metrics_payload,
+                "--min-coverage-ratio",
+                "0.95",
+                "--strict",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads(summary_output.read_text(encoding="utf-8"))
+            self.assertEqual(summary["summary_status"], "complete")
+
+    def test_coverage_below_minimum_is_partial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics_payload = self.make_metrics_payload()
+            metrics_payload["quality"]["coverage_ratio"] = 0.94
+
+            result, summary_output, _ = self.run_summary(
+                tmpdir,
+                metrics_payload,
+                "--min-coverage-ratio",
+                "0.95",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads(summary_output.read_text(encoding="utf-8"))
+            self.assertEqual(summary["summary_status"], "partial")
+
+    def test_invalid_min_coverage_ratio_fails_argument_validation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, _, _ = self.run_summary(
+                tmpdir,
+                self.make_metrics_payload(),
+                "--min-coverage-ratio",
+                "1.1",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--min-coverage-ratio must be between 0 and 1", result.stderr)
+
     def test_strict_mode_fails_when_cpu_utilization_is_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()

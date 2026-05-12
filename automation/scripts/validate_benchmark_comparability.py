@@ -128,6 +128,9 @@ def main() -> int:
             f"{args.mode} validation {report[status_field]}; see {args.report_output}",
             file=sys.stderr,
         )
+        detail = strict_failure_detail(report)
+        if detail:
+            print(detail, file=sys.stderr)
         return 2
     return 0
 
@@ -383,6 +386,27 @@ def numeric_value(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def strict_failure_detail(report: dict[str, Any]) -> str:
+    rejected_runs = report.get("rejected_runs")
+    if not isinstance(rejected_runs, list) or not rejected_runs:
+        return ""
+
+    lines = ["rejected runs:"]
+    for rejected in rejected_runs:
+        if not isinstance(rejected, dict):
+            continue
+        run_id = rejected.get("run_id", "<unknown>")
+        reasons = rejected.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            reason_text = "; ".join(str(reason) for reason in reasons)
+        else:
+            reason_text = "<no reasons recorded>"
+        lines.append(f"- {run_id}: {reason_text}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
