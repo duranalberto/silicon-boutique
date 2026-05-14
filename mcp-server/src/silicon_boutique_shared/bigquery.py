@@ -20,6 +20,14 @@ class BigQueryHelperError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class CommandResult:
+    """Container for command Result state and behavior.
+
+
+    Attributes:
+        returncode: returncode (int) stored on the object.
+        stdout: standard output (str) stored on the object.
+        stderr: standard error (str) stored on the object.
+    """
     returncode: int
     stdout: str
     stderr: str
@@ -29,6 +37,21 @@ Runner = Callable[[list[str]], CommandResult]
 
 
 def validate_destination(project_id: str, dataset_id: str, table_id: str, location: str) -> None:
+    """Validate destination.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not PROJECT_RE.match(project_id):
         raise BigQueryHelperError(f"invalid GCP project_id: {project_id}")
     for label, value in (("dataset_id", dataset_id), ("table_id", table_id)):
@@ -39,14 +62,45 @@ def validate_destination(project_id: str, dataset_id: str, table_id: str, locati
 
 
 def table_ref(project_id: str, dataset_id: str, table_id: str) -> str:
+    """Compute table ref.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+
+    Returns:
+        str value produced by table ref.
+    """
     return f"{project_id}:{dataset_id}.{table_id}"
 
 
 def table_sql_name(project_id: str, dataset_id: str, table_id: str) -> str:
+    """Compute table SQL name.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+
+    Returns:
+        str value produced by table SQL name.
+    """
     return f"{project_id}.{dataset_id}.{table_id}"
 
 
 def sql_string(value: str) -> str:
+    """Compute sQL string.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by sQL string.
+    """
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
@@ -57,6 +111,18 @@ def show_table_command(
     *,
     bq_command: str = "bq",
 ) -> list[str]:
+    """Compute show table command.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        bq_command: bigQuery command (str) used by this operation.
+
+    Returns:
+        list[str] value produced by show table command.
+    """
     return [
         bq_command,
         "--format=json",
@@ -75,6 +141,19 @@ def query_command(
     bq_command: str = "bq",
     format_json: bool = True,
 ) -> list[str]:
+    """Query command.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        location: location (str) used by this operation.
+        query: query (str) used by this operation.
+        bq_command: bigQuery command (str) used by this operation.
+        format_json: format JSON (bool) used by this operation.
+
+    Returns:
+        list[str] value produced by query command.
+    """
     command = [bq_command]
     if format_json:
         command.append("--format=json")
@@ -102,6 +181,21 @@ def load_command(
     *,
     bq_command: str = "bq",
 ) -> list[str]:
+    """Load command.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+        source_path: source path (str) used by this operation.
+        schema_path: schema path (str) used by this operation.
+        bq_command: bigQuery command (str) used by this operation.
+
+    Returns:
+        list[str] value produced by load command.
+    """
     return [
         bq_command,
         "--project_id",
@@ -123,6 +217,18 @@ def delete_table_command(
     *,
     bq_command: str = "bq",
 ) -> list[str]:
+    """Delete table command.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        bq_command: bigQuery command (str) used by this operation.
+
+    Returns:
+        list[str] value produced by delete table command.
+    """
     return [
         bq_command,
         "--project_id",
@@ -135,6 +241,19 @@ def delete_table_command(
 
 
 def parse_bq_json_array(payload: str, *, label: str = "bq query") -> list[dict[str, Any]]:
+    """Parse bigQuery JSON array.
+
+
+    Args:
+        payload: payload (str) used by this operation.
+        label: label (str) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by parse BigQuery JSON array.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         rows = json.loads(payload or "[]")
     except json.JSONDecodeError as exc:
@@ -145,6 +264,18 @@ def parse_bq_json_array(payload: str, *, label: str = "bq query") -> list[dict[s
 
 
 def run_bq(command: list[str]) -> CommandResult:
+    """Run bigQuery.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+
+    Returns:
+        CommandResult value produced by run bigquery.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         result = subprocess.run(
             command,

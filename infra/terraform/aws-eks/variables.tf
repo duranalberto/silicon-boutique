@@ -31,7 +31,7 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region for the benchmark EKS scaffold."
+  description = "AWS region for the benchmark EKS environment."
   type        = string
   default     = "us-east-1"
 

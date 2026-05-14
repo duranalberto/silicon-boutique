@@ -1,3 +1,5 @@
+"""Tests for test launch metrics dashboard."""
+
 import importlib.util
 import io
 import json
@@ -20,7 +22,15 @@ spec.loader.exec_module(launcher)
 
 
 class LaunchMetricsDashboardTest(unittest.TestCase):
+    """Unit tests covering launch Metrics Dashboard behavior.
+    """
     def test_parse_args_defaults_to_local_summary_store(self):
+        """Verify parse arguments defaults to local summary store.
+
+
+        Returns:
+            None.
+        """
         with mock.patch.object(sys, "argv", ["launch_metrics_dashboard.py"]):
             args = launcher.parse_args()
 
@@ -28,6 +38,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertEqual(args.output_dir, Path("artifacts/dashboard"))
 
     def test_builds_dashboard_from_local_ndjson_with_rankings_and_latest_run(self):
+        """Verify builds dashboard from local NDJSON with rankings and latest run.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             store = base / "benchmark-summaries.ndjson"
@@ -69,6 +85,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             )
 
     def test_dashboard_data_lists_rejected_runs_duplicates_and_nullable_local_costs(self):
+        """Verify dashboard data lists rejected runs duplicates and nullable local costs.
+
+
+        Returns:
+            None.
+        """
         row_a = valid_summary("duplicate", cloud_provider="local", pricing_model="local")
         row_a["node_hourly_price_usd"] = None
         row_a["benchmark_compute_cost_usd"] = None
@@ -110,6 +132,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             self.assertEqual(data["comparison"]["warnings"][0]["reason"], "missing_cost_fields")
 
     def test_bigquery_mode_queries_history_and_sets_source_metadata(self):
+        """Verify BigQuery mode queries history and sets source metadata.
+
+
+        Returns:
+            None.
+        """
         run_a = valid_summary("run-a")
         run_b = valid_summary(
             "run-b",
@@ -152,7 +180,40 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             self.assertIn("pricing_model = 'spot'", query)
             self.assertIn("LIMIT 5", query)
 
+    def test_dashboard_filters_match_comparison_report_filters(self):
+        """Verify dashboard filters match comparison report filters.
+
+
+        Returns:
+            None.
+        """
+        args = dashboard_args(
+            summary_store=Path("unused.ndjson"),
+            machine_type="c3-standard-4",
+            processor_family="c3",
+            architecture="x86_64",
+            cloud_provider="gcp",
+            pricing_model="spot",
+        )
+
+        self.assertEqual(
+            launcher.comparison.filter_values(args),
+            {
+                "machine_type": "c3-standard-4",
+                "processor_family": "c3",
+                "architecture": "x86_64",
+                "cloud_provider": "gcp",
+                "pricing_model": "spot",
+            },
+        )
+
     def test_incomplete_bigquery_args_fail_before_querying(self):
+        """Verify incomplete BigQuery arguments fail before querying.
+
+
+        Returns:
+            None.
+        """
         argv = [
             "launch_metrics_dashboard.py",
             "--project-id",
@@ -170,6 +231,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertIn("--dataset-id, --table-id, and --location", stderr.getvalue())
 
     def test_summary_store_and_project_id_fail_clearly(self):
+        """Verify summary store and project ID fail clearly.
+
+
+        Returns:
+            None.
+        """
         argv = [
             "launch_metrics_dashboard.py",
             "--summary-store",
@@ -193,6 +260,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertIn("--summary-store cannot be used with --project-id", stderr.getvalue())
 
     def test_bigquery_query_failure_returns_clear_error(self):
+        """Verify BigQuery query failure returns clear error.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner([], returncode=1, stderr="access denied")
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(launcher.comparison.ComparisonReportError) as context:
@@ -214,6 +287,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertIn("failed to query BigQuery summaries: access denied", str(context.exception))
 
     def test_bigquery_malformed_json_returns_clear_error(self):
+        """Verify BigQuery malformed JSON returns clear error.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner("not-json")
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(launcher.comparison.ComparisonReportError) as context:
@@ -235,6 +314,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertIn("bq query did not return valid JSON", str(context.exception))
 
     def test_visual_dashboard_html_is_self_contained_and_references_data_file(self):
+        """Verify visual dashboard HTML is self contained and references data file.
+
+
+        Returns:
+            None.
+        """
         html = launcher.render_html()
 
         self.assertIn("<style>", html)
@@ -259,6 +344,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             self.assertIn(label, html)
 
     def test_no_comparable_groups_render_empty_state(self):
+        """Verify no comparable groups render empty state.
+
+
+        Returns:
+            None.
+        """
         partial = valid_summary("partial")
         partial["summary_status"] = "partial"
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -281,6 +372,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             self.assertIn("No comparable groups.", html)
 
     def test_mixed_provider_rows_are_preserved_for_visual_dashboard(self):
+        """Verify mixed provider rows are preserved for visual dashboard.
+
+
+        Returns:
+            None.
+        """
         rows = [
             valid_summary("local-a", cloud_provider="local", pricing_model="local", region="local", zone="local"),
             valid_summary("gcp-a", cloud_provider="gcp", pricing_model="spot"),
@@ -316,6 +413,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
             self.assertEqual(providers, {"local", "gcp", "aws"})
 
     def test_missing_summary_store_returns_cli_error(self):
+        """Verify missing summary store returns CLI error.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             argv = [
@@ -335,6 +438,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         self.assertIn("summary store does not exist", stderr.getvalue())
 
     def test_no_serve_does_not_open_browser(self):
+        """Verify no serve does not open browser.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             store = base / "benchmark-summaries.ndjson"
@@ -357,6 +466,12 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
         open_browser.assert_not_called()
 
     def test_create_server_selects_localhost_url_for_ephemeral_port(self):
+        """Verify create server selects localhost URL for ephemeral port.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             server, url = launcher.create_server(Path(tmpdir), host="127.0.0.1", port=0)
             try:
@@ -366,13 +481,35 @@ class LaunchMetricsDashboardTest(unittest.TestCase):
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(self, rows, *, returncode=0, stderr=""):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            rows: rows used by this operation.
+            returncode: returncode used by this operation.
+            stderr: standard error used by this operation.
+
+        Returns:
+            None.
+        """
         self.rows = rows
         self.returncode = returncode
         self.stderr = stderr
         self.commands = []
 
     def __call__(self, command):
+        """Handle the object call using the supplied arguments.
+
+
+        Args:
+            command: command used by this operation.
+
+        Returns:
+            Result produced by call.
+        """
         self.commands.append(command)
         stdout = self.rows if isinstance(self.rows, str) else json.dumps(self.rows)
         return launcher.comparison.CommandResult(self.returncode, stdout, self.stderr)
@@ -392,6 +529,25 @@ def dashboard_args(
     pricing_model=None,
     limit=None,
 ):
+    """Compute dashboard arguments.
+
+
+    Args:
+        summary_store: summary store used by this operation.
+        project_id: project ID used by this operation.
+        dataset_id: dataset ID used by this operation.
+        table_id: table ID used by this operation.
+        location: location used by this operation.
+        machine_type: machine type used by this operation.
+        processor_family: processor family used by this operation.
+        architecture: architecture used by this operation.
+        cloud_provider: cloud provider used by this operation.
+        pricing_model: pricing model used by this operation.
+        limit: limit used by this operation.
+
+    Returns:
+        Result produced by dashboard arguments.
+    """
     return launcher.argparse.Namespace(
         summary_store=summary_store,
         project_id=project_id,
@@ -408,6 +564,16 @@ def dashboard_args(
 
 
 def write_store(path, rows):
+    """Write store.
+
+
+    Args:
+        path: path used by this operation.
+        rows: rows used by this operation.
+
+    Returns:
+        None.
+    """
     path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
@@ -426,13 +592,37 @@ def valid_summary(
     memory_gb=1.0,
     cost=0.4,
     failures=1,
-    request_total=1000,
+    request_total=120000,
     benchmark_start="2026-05-07T12:00:00Z",
     cloud_provider="gcp",
     pricing_model="spot",
     region="us-central1",
     zone="us-central1-a",
 ):
+    """Compute valid summary.
+
+
+    Args:
+        run_id: run ID used by this operation.
+        machine_type: machine type used by this operation.
+        processor_family: processor family used by this operation.
+        architecture: architecture used by this operation.
+        avg_rps: avg rps used by this operation.
+        cpu_cores: CPU cores used by this operation.
+        p99: p99 used by this operation.
+        memory_gb: memory GB used by this operation.
+        cost: cost used by this operation.
+        failures: failures used by this operation.
+        request_total: request total used by this operation.
+        benchmark_start: benchmark start used by this operation.
+        cloud_provider: cloud provider used by this operation.
+        pricing_model: pricing model used by this operation.
+        region: region used by this operation.
+        zone: zone used by this operation.
+
+    Returns:
+        Result produced by valid summary.
+    """
     return {
         "architecture": architecture,
         "avg_cpu_throttling_ratio": 0.01,

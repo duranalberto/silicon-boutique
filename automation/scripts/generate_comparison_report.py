@@ -7,11 +7,11 @@ import argparse
 import json
 import math
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import load_benchmark_summary_to_bigquery as bigquery
+import load_benchmark_summary_to_bigquery as BigQuery
+import audit_bigquery_benchmark_summaries as summary_audit
 import validate_benchmark_comparability as comparability
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +20,7 @@ if str(SHARED_SRC) not in sys.path:
     sys.path.insert(0, str(SHARED_SRC))
 
 from silicon_boutique_shared import bigquery as bq_helpers
+from silicon_boutique_shared.automation import utc_now, write_json
 
 
 GROUP_FIELDS = (
@@ -84,6 +85,15 @@ Runner = bq_helpers.Runner
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Generate machine comparison reports from benchmark summaries."
     )
@@ -117,6 +127,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args()
     try:
         rows, source = load_rows(args)
@@ -134,13 +150,22 @@ def main() -> int:
         )
         write_json(args.report_output, report)
         write_text(args.markdown_output, render_markdown(report))
-    except (ComparisonReportError, comparability.ComparabilityError, bigquery.BigQueryLoadError) as exc:
+    except (ComparisonReportError, comparability.ComparabilityError, BigQuery.BigQueryLoadError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     return 0
 
 
 def load_rows(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load rows.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        tuple[list[dict[str, Any]], dict[str, Any]] value produced by load rows.
+    """
     if args.summary_store:
         return read_summary_store(args.summary_store), {
             "type": "ndjson",
@@ -157,7 +182,7 @@ def load_rows(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str,
     )
     return rows, {
         "type": "bigquery",
-        "summary_table": bigquery.table_sql_name(
+        "summary_table": bq_helpers.table_sql_name(
             args.project_id, args.dataset_id, args.table_id
         ),
         "location": args.location,
@@ -165,6 +190,18 @@ def load_rows(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str,
 
 
 def read_summary_store(path: Path) -> list[dict[str, Any]]:
+    """Read summary store.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by read summary store.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         raise ComparisonReportError(f"summary store does not exist: {path}")
     rows: list[dict[str, Any]] = []
@@ -197,15 +234,33 @@ def query_bigquery_rows(
     limit: int | None,
     runner: Runner,
 ) -> list[dict[str, Any]]:
-    bigquery.validate_destination(project_id, dataset_id, table_id, location)
+    """Query BigQuery rows.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+        filters: filters (dict[str, str]) used by this operation.
+        limit: limit (int | None) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by query BigQuery rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
+    BigQuery.validate_destination(project_id, dataset_id, table_id, location)
     where_parts = [
-        f"{field} = {bigquery.sql_string(value)}"
+        f"{field} = {bq_helpers.sql_string(value)}"
         for field, value in filters.items()
         if value is not None
     ]
     query = (
         "SELECT * FROM "
-        f"`{bigquery.table_sql_name(project_id, dataset_id, table_id)}`"
+        f"`{bq_helpers.table_sql_name(project_id, dataset_id, table_id)}`"
     )
     if where_parts:
         query += " WHERE " + " AND ".join(where_parts)
@@ -225,10 +280,28 @@ def query_bigquery_rows(
 
 
 def normalize_bigquery_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize BigQuery rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by normalize BigQuery rows.
+    """
     return [normalize_bigquery_row(row) for row in rows]
 
 
 def normalize_bigquery_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize BigQuery row.
+
+
+    Args:
+        row: row (dict[str, Any]) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by normalize BigQuery row.
+    """
     normalized = dict(row)
     integer_fields = {
         "node_count",
@@ -279,6 +352,15 @@ def normalize_bigquery_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_int_field(value: Any) -> int | None:
+    """Parse integer field.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        int | None value produced by parse integer field.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -295,6 +377,15 @@ def parse_int_field(value: Any) -> int | None:
 
 
 def parse_float_field(value: Any) -> float | None:
+    """Parse float field.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        float | None value produced by parse float field.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -312,6 +403,20 @@ def parse_float_field(value: Any) -> float | None:
 
 
 def parse_json_object_field(value: str, *, field: str, run_id: str) -> dict[str, Any]:
+    """Parse jSON object field.
+
+
+    Args:
+        value: value (str) used by this operation.
+        field: field (str) used by this operation.
+        run_id: run ID (str) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by parse JSON object field.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         parsed = json.loads(value or "{}")
     except json.JSONDecodeError as exc:
@@ -324,6 +429,15 @@ def parse_json_object_field(value: str, *, field: str, run_id: str) -> dict[str,
 
 
 def re_fullmatch_int(value: str) -> bool:
+    """Compute re fullmatch integer.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        bool value produced by re fullmatch integer.
+    """
     return value.isdigit() or (value.startswith("-") and value[1:].isdigit())
 
 
@@ -336,6 +450,20 @@ def build_comparison_report(
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> dict[str, Any]:
+    """Build comparison report.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        source: source (dict[str, Any]) used by this operation.
+        schema: schema (dict[str, Any]) used by this operation.
+        schema_path: schema path (Path) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build comparison report.
+    """
     schema_fields = comparability.schema_field_set(schema)
     accepted_rows: list[dict[str, Any]] = []
     rejected_runs: list[dict[str, Any]] = []
@@ -351,6 +479,15 @@ def build_comparison_report(
         )
         if any(reason.startswith("schema_") for reason in reasons):
             schema_drift_found = True
+        audit_findings = summary_audit.row_findings(
+            row,
+            row_index=index,
+            min_duration_seconds=min_duration_seconds,
+            min_coverage_ratio=min_coverage_ratio,
+        )
+        suspect_findings = summary_audit.suspect_findings(audit_findings)
+        if suspect_findings:
+            reasons.extend(suspect_findings)
         if reasons:
             rejected_runs.append({"run_id": row.get("run_id") or f"row-{index}", "reasons": reasons})
         else:
@@ -379,6 +516,11 @@ def build_comparison_report(
         "comparison_groups": groups,
         "rankings": rankings,
         "rejected_runs": rejected_runs,
+        "suspect_run_ids": [
+            rejected["run_id"]
+            for rejected in rejected_runs
+            if summary_audit.suspect_findings(rejected.get("reasons", []))
+        ],
         "warnings": warnings,
     }
 
@@ -386,6 +528,16 @@ def build_comparison_report(
 def reject_field_set_drift(
     accepted_rows: list[dict[str, Any]], rejected_runs: list[dict[str, Any]]
 ) -> bool:
+    """Compute reject field set drift.
+
+
+    Args:
+        accepted_rows: accepted rows (list[dict[str, Any]]) used by this operation.
+        rejected_runs: rejected runs (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        bool value produced by reject field set drift.
+    """
     field_sets = [
         sorted(field for field in row if field not in comparability.NULLABLE_COMPARABILITY_FIELDS)
         for row in accepted_rows
@@ -404,6 +556,16 @@ def reject_field_set_drift(
 def aggregate_groups(
     rows: list[dict[str, Any]], warnings: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """Aggregate groups.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        warnings: warnings (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by aggregate groups.
+    """
     buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for row in rows:
         buckets.setdefault(group_key(row), []).append(row)
@@ -414,6 +576,17 @@ def aggregate_groups(
 def aggregate_group(
     index: int, rows: list[dict[str, Any]], warnings: list[dict[str, Any]]
 ) -> dict[str, Any]:
+    """Aggregate group.
+
+
+    Args:
+        index: index (int) used by this operation.
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        warnings: warnings (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by aggregate group.
+    """
     first = rows[0]
     metrics = {
         field: mean_number(row.get(field) for row in rows)
@@ -448,6 +621,15 @@ def aggregate_group(
 
 
 def build_rankings(groups: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Build rankings.
+
+
+    Args:
+        groups: groups (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        dict[str, list[dict[str, Any]]] value produced by build rankings.
+    """
     rankings: dict[str, list[dict[str, Any]]] = {}
     for metric, direction in RANKINGS.items():
         entries = []
@@ -473,6 +655,15 @@ def build_rankings(groups: list[dict[str, Any]]) -> dict[str, list[dict[str, Any
 
 
 def render_markdown(report: dict[str, Any]) -> str:
+    """Render markdown.
+
+
+    Args:
+        report: report (dict[str, Any]) used by this operation.
+
+    Returns:
+        str value produced by render markdown.
+    """
     lines = [
         "# SiliconBoutique Comparison Report",
         "",
@@ -530,6 +721,19 @@ def report_status(
     warning_count: int,
     schema_drift_found: bool,
 ) -> str:
+    """Compute report status.
+
+
+    Args:
+        total_rows: total rows (int) used by this operation.
+        group_count: group count (int) used by this operation.
+        rejected_count: rejected count (int) used by this operation.
+        warning_count: warning count (int) used by this operation.
+        schema_drift_found: schema drift found (bool) used by this operation.
+
+    Returns:
+        str value produced by report status.
+    """
     if total_rows == 0 or group_count == 0 or schema_drift_found:
         return "fail"
     if rejected_count or warning_count:
@@ -538,6 +742,15 @@ def report_status(
 
 
 def filter_values(args: argparse.Namespace) -> dict[str, str]:
+    """Filter values.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by filter values.
+    """
     return {
         field: value
         for field, value in (
@@ -552,6 +765,16 @@ def filter_values(args: argparse.Namespace) -> dict[str, str]:
 
 
 def apply_filters(rows: list[dict[str, Any]], filters: dict[str, str]) -> list[dict[str, Any]]:
+    """Apply filters.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        filters: filters (dict[str, str]) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by apply filters.
+    """
     return [
         row
         for row in rows
@@ -560,14 +783,41 @@ def apply_filters(rows: list[dict[str, Any]], filters: dict[str, str]) -> list[d
 
 
 def sort_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by sort rows.
+    """
     return sorted(rows, key=lambda row: str(row.get("benchmark_start") or ""), reverse=True)
 
 
 def group_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    """Compute group key.
+
+
+    Args:
+        row: row (dict[str, Any]) used by this operation.
+
+    Returns:
+        tuple[Any, ...] value produced by group key.
+    """
     return tuple(row.get(field) for field in GROUP_FIELDS)
 
 
 def sum_int(values: Any) -> int:
+    """Compute sum integer.
+
+
+    Args:
+        values: values (Any) used by this operation.
+
+    Returns:
+        int value produced by sum integer.
+    """
     total = 0
     for value in values:
         parsed = number_or_none(value)
@@ -577,6 +827,15 @@ def sum_int(values: Any) -> int:
 
 
 def mean_number(values: Any) -> float | None:
+    """Compute mean number.
+
+
+    Args:
+        values: values (Any) used by this operation.
+
+    Returns:
+        float | None value produced by mean number.
+    """
     numbers = [number for number in (number_or_none(value) for value in values) if number is not None]
     if not numbers:
         return None
@@ -584,6 +843,16 @@ def mean_number(values: Any) -> float | None:
 
 
 def ratio(numerator: Any, denominator: Any) -> float | None:
+    """Compute ratio.
+
+
+    Args:
+        numerator: numerator (Any) used by this operation.
+        denominator: denominator (Any) used by this operation.
+
+    Returns:
+        float | None value produced by ratio.
+    """
     numerator_value = number_or_none(numerator)
     denominator_value = number_or_none(denominator)
     if numerator_value is None or denominator_value is None or denominator_value <= 0:
@@ -592,6 +861,15 @@ def ratio(numerator: Any, denominator: Any) -> float | None:
 
 
 def number_or_none(value: Any) -> float | None:
+    """Compute number or none.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        float | None value produced by number or none.
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -604,40 +882,78 @@ def number_or_none(value: Any) -> float | None:
 
 
 def max_string(values: Any) -> str | None:
+    """Compute max string.
+
+
+    Args:
+        values: values (Any) used by this operation.
+
+    Returns:
+        str | None value produced by max string.
+    """
     strings = [str(value) for value in values if value]
     return max(strings) if strings else None
 
 
 def ranking_lookup(entries: list[dict[str, Any]]) -> dict[str, int]:
+    """Compute ranking lookup.
+
+
+    Args:
+        entries: entries (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        dict[str, int] value produced by ranking lookup.
+    """
     return {entry["group_id"]: entry["rank"] for entry in entries}
 
 
 def format_number(value: Any) -> str:
+    """Format number.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        str value produced by format number.
+    """
     number = number_or_none(value)
     if number is None:
         return ""
     return f"{number:.6g}"
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
 def run_bq(command: list[str]) -> CommandResult:
+    """Run bigQuery.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+
+    Returns:
+        CommandResult value produced by run bigquery.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return bq_helpers.run_bq(command)
     except bq_helpers.BigQueryHelperError as exc:
         raise ComparisonReportError(str(exc)) from exc
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
 def write_text(path: Path, content: str) -> None:
+    """Write text.
+
+
+    Args:
+        path: path (Path) used by this operation.
+        content: content (str) used by this operation.
+
+    Returns:
+        None.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 

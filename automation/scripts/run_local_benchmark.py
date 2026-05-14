@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run the SiliconBoutique benchmark flow against local Kubernetes."""
+"""Command-line workflow for run local benchmark in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ from silicon_boutique_shared.automation import (
     append_log,
     append_text,
     bool_string,
+    parse_duration_seconds,
     shell_join,
     shell_quote,
     summarize_command_failure,
@@ -46,6 +51,51 @@ class LocalBenchmarkError(RuntimeError):
 
 @dataclass
 class BenchmarkConfig:
+    """Container for benchmark Config state and behavior.
+
+
+    Attributes:
+        run_id: run ID (str) stored on the object.
+        artifacts_dir: artifacts dir (Path) stored on the object.
+        terraform_dir: terraform dir (Path) stored on the object.
+        workload_chart: workload chart (Path) stored on the object.
+        monitoring_chart: monitoring chart (Path) stored on the object.
+        workload_release: workload release (str) stored on the object.
+        monitoring_release: monitoring release (str) stored on the object.
+        machine_type: machine type (str) stored on the object.
+        processor_family: processor family (str) stored on the object.
+        cpu_platform: CPU platform (str | None) stored on the object.
+        architecture: architecture (str) stored on the object.
+        region: region (str) stored on the object.
+        zone: zone (str) stored on the object.
+        node_count: node count (int) stored on the object.
+        concurrent_users: concurrent users (str) stored on the object.
+        users_per_second: users per second (str) stored on the object.
+        test_duration: test duration (str) stored on the object.
+        test_duration_seconds: test duration seconds (int) stored on the object.
+        pricing_model: pricing model (str) stored on the object.
+        load_profile_source: load profile source (str) stored on the object.
+        prometheus_port: Prometheus port (int) stored on the object.
+        min_duration_seconds: min duration seconds (int) stored on the object.
+        min_coverage_ratio: min coverage ratio (float) stored on the object.
+        failure_stage: failure stage (str) stored on the object.
+        skip_destroy: skip destroy (bool) stored on the object.
+        replace_summary: replace summary (bool) stored on the object.
+        persist_bigquery: persist BigQuery (bool) stored on the object.
+        bigquery_env_file: BigQuery environment file (Path | None) stored on the object.
+        bigquery_project_id: BigQuery project ID (str) stored on the object.
+        bigquery_dataset: BigQuery dataset (str) stored on the object.
+        bigquery_table: BigQuery table (str) stored on the object.
+        bigquery_location: BigQuery location (str) stored on the object.
+        environment: environment (str) stored on the object.
+        cloud_provider: cloud provider (str) stored on the object.
+        namespace: namespace (str) stored on the object.
+        kube_context: kube context (str) stored on the object.
+        benchmark_start: benchmark start (str) stored on the object.
+        benchmark_end: benchmark end (str) stored on the object.
+        destroy_attempted: destroy attempted (str) stored on the object.
+        destroy_succeeded: destroy succeeded (str) stored on the object.
+    """
     run_id: str
     artifacts_dir: Path
     terraform_dir: Path
@@ -71,6 +121,7 @@ class BenchmarkConfig:
     min_coverage_ratio: float
     failure_stage: str
     skip_destroy: bool
+    replace_summary: bool
     persist_bigquery: bool
     bigquery_env_file: Path | None
     bigquery_project_id: str
@@ -89,16 +140,31 @@ class BenchmarkConfig:
 
     @property
     def summary_artifact_name(self) -> str:
+        """Compute summary artifact name.
+
+
+        Returns:
+            str value produced by summary artifact name.
+        """
         return f"benchmark-local-{self.run_id}"
 
 
 @dataclass(frozen=True)
 class BenchmarkWorkflowResult:
+    """Container for benchmark Workflow Result state and behavior.
+
+
+    Attributes:
+        primary_error: primary error (Exception | None) stored on the object.
+        teardown_error: teardown error (Exception | None) stored on the object.
+    """
     primary_error: Exception | None
     teardown_error: Exception | None
 
 
 class CommandRunner:
+    """Container for command Runner state and behavior.
+    """
     def run(
         self,
         command: list[str],
@@ -110,6 +176,24 @@ class CommandRunner:
         input_text: str | None = None,
         timeout: str | None = None,
     ) -> CommandResult:
+        """Run the configured operation.
+
+
+        Args:
+            command: command (list[str]) used by this operation.
+            cwd: cwd (Path | None) used by this operation.
+            check: check (bool) used by this operation.
+            capture: capture (bool) used by this operation.
+            log_path: log path (Path | None) used by this operation.
+            input_text: input text (str | None) used by this operation.
+            timeout: timeout (str | None) used by this operation.
+
+        Returns:
+            CommandResult value produced by run.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         rendered = command
         if timeout:
             rendered = ["timeout", timeout, *command]
@@ -134,6 +218,8 @@ class CommandRunner:
 
 
 class LocalBenchmark:
+    """Container for local Benchmark state and behavior.
+    """
     def __init__(
         self,
         config: BenchmarkConfig,
@@ -142,6 +228,18 @@ class LocalBenchmark:
         sleep=time.sleep,
         popen=subprocess.Popen,
     ) -> None:
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            config: config (BenchmarkConfig) used by this operation.
+            runner: runner (CommandRunner | None) used by this operation.
+            sleep: sleep used by this operation.
+            popen: popen used by this operation.
+
+        Returns:
+            None.
+        """
         self.config = config
         self.runner = runner or CommandRunner()
         self.sleep = sleep
@@ -150,6 +248,12 @@ class LocalBenchmark:
         self.primary_error: Exception | None = None
 
     def run(self) -> int:
+        """Run the configured operation.
+
+
+        Returns:
+            int value produced by run.
+        """
         result = self.execute()
         if result.teardown_error:
             print(str(result.teardown_error), file=sys.stderr)
@@ -160,6 +264,15 @@ class LocalBenchmark:
         return 0
 
     def execute(self, after_extract=None) -> BenchmarkWorkflowResult:
+        """Compute execute.
+
+
+        Args:
+            after_extract: after extract used by this operation.
+
+        Returns:
+            BenchmarkWorkflowResult value produced by execute.
+        """
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.preflight_bigquery()
@@ -183,6 +296,15 @@ class LocalBenchmark:
         return BenchmarkWorkflowResult(self.primary_error, teardown_error)
 
     def provision(self) -> None:
+        """Compute provision.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         self.validate_kubernetes_context()
 
         terraform_dir = self.config.terraform_dir
@@ -260,6 +382,15 @@ class LocalBenchmark:
         )
 
     def preflight_bigquery(self) -> None:
+        """Compute preflight bigquery.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if not self.config.persist_bigquery:
             return
         result = self.runner.run(
@@ -295,6 +426,15 @@ class LocalBenchmark:
             )
 
     def validate_kubernetes_context(self) -> None:
+        """Validate kubernetes context.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         result = self.runner.run(
             [
                 "kubectl",
@@ -330,6 +470,12 @@ class LocalBenchmark:
         raise LocalBenchmarkError(message)
 
     def terraform_vars(self) -> list[str]:
+        """Compute terraform vars.
+
+
+        Returns:
+            list[str] value produced by terraform vars.
+        """
         return [
             f"-var=run_id={self.config.run_id}",
             f"-var=machine_type={self.config.machine_type}",
@@ -340,6 +486,15 @@ class LocalBenchmark:
         ]
 
     def terraform_outputs(self) -> dict[str, Any]:
+        """Compute terraform outputs.
+
+
+        Returns:
+            dict[str, Any] value produced by terraform outputs.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         result = self.runner.run(
             ["terraform", "output", "-json"],
             cwd=self.config.terraform_dir,
@@ -351,6 +506,12 @@ class LocalBenchmark:
             raise LocalBenchmarkError("terraform output -json returned invalid JSON") from exc
 
     def deploy_workload(self) -> None:
+        """Compute deploy workload.
+
+
+        Returns:
+            None.
+        """
         self.runner.run(["helm", "dependency", "update", str(self.config.workload_chart)])
         self.runner.run(["helm", "lint", str(self.config.workload_chart)])
         self.runner.run(
@@ -409,6 +570,12 @@ class LocalBenchmark:
         )
 
     def deploy_monitoring(self) -> None:
+        """Compute deploy monitoring.
+
+
+        Returns:
+            None.
+        """
         self.runner.run(["helm", "dependency", "update", str(self.config.monitoring_chart)])
         self.runner.run(["helm", "lint", str(self.config.monitoring_chart)])
         self.runner.run(
@@ -479,7 +646,10 @@ class LocalBenchmark:
                 "pod",
                 "--for=condition=Ready",
                 "--selector",
-                "app.kubernetes.io/name=prometheus",
+                (
+                    "app.kubernetes.io/name=prometheus,"
+                    "operator.prometheus.io/name=sb-monitoring-kube-prometh-prometheus"
+                ),
                 "--timeout=10m",
                 "--namespace",
                 self.config.namespace,
@@ -489,7 +659,16 @@ class LocalBenchmark:
         )
 
     def wait_for_required_metrics(self) -> None:
-        readiness_path = self.config.artifacts_dir / "prometheus-metrics-readiness.json"
+        """Compute wait for required metrics.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
+        readiness_path = self.config.artifacts_dir / "Prometheus-metrics-readiness.json"
         with self.port_forward_prometheus():
             for attempt in range(1, 41):
                 end = utc_now()
@@ -531,6 +710,12 @@ class LocalBenchmark:
                 self.sleep(15)
 
     def run_benchmark_window(self) -> None:
+        """Run benchmark window.
+
+
+        Returns:
+            None.
+        """
         self.runner.run(
             [
                 "kubectl",
@@ -561,6 +746,12 @@ class LocalBenchmark:
         self.config.benchmark_end = utc_now()
 
     def update_monitoring_benchmark_window(self) -> None:
+        """Compute update monitoring benchmark window.
+
+
+        Returns:
+            None.
+        """
         self.runner.run(
             [
                 "helm",
@@ -581,6 +772,12 @@ class LocalBenchmark:
         )
 
     def extract_and_summarize(self) -> None:
+        """Compute extract and summarize.
+
+
+        Returns:
+            None.
+        """
         metrics_path = self.config.artifacts_dir / "prometheus-metrics.json"
         loadgenerator_logs_path = self.config.artifacts_dir / "loadgenerator.log"
         loadgenerator_stats_path = self.config.artifacts_dir / "loadgenerator-stats.json"
@@ -611,19 +808,7 @@ class LocalBenchmark:
                 ],
                 cwd=REPO_ROOT,
             )
-        logs = self.runner.run(
-            [
-                "kubectl",
-                "logs",
-                "deployment/loadgenerator",
-                "--namespace",
-                self.config.namespace,
-                "--context",
-                self.config.kube_context,
-            ],
-            capture=True,
-        )
-        loadgenerator_logs_path.write_text(logs.stdout, encoding="utf-8")
+        log_source = self.capture_loadgenerator_logs(loadgenerator_logs_path)
         self.runner.run(
             [
                 sys.executable,
@@ -634,52 +819,56 @@ class LocalBenchmark:
                 str(loadgenerator_stats_path),
                 "--run-id",
                 self.config.run_id,
+                "--duration-seconds",
+                str(self.config.test_duration_seconds),
+                "--log-source",
+                log_source,
                 "--strict",
             ],
             cwd=REPO_ROOT,
         )
-        self.runner.run(
-            [
-                sys.executable,
-                "automation/scripts/generate_benchmark_summary.py",
-                "--metrics-input",
-                str(metrics_path),
-                "--loadgenerator-stats",
-                str(loadgenerator_stats_path),
-                "--summary-output",
-                str(summary_path),
-                "--summary-store",
-                str(summary_store_path),
-                "--environment",
-                self.config.environment,
-                "--machine-type",
-                self.config.machine_type,
-                "--processor-family",
-                self.config.processor_family,
-                "--architecture",
-                self.config.architecture,
-                "--cloud-provider",
-                self.config.cloud_provider,
-                "--region",
-                self.config.region,
-                "--zone",
-                self.config.zone,
-                "--node-count",
-                str(self.config.node_count),
-                "--pricing-model",
-                self.config.pricing_model,
-                "--concurrent-users",
-                self.config.concurrent_users,
-                "--users-per-second",
-                self.config.users_per_second,
-                "--load-profile-source",
-                self.config.load_profile_source,
-                "--min-coverage-ratio",
-                str(self.config.min_coverage_ratio),
-                "--strict",
-            ],
-            cwd=REPO_ROOT,
-        )
+        summary_command = [
+            sys.executable,
+            "automation/scripts/generate_benchmark_summary.py",
+            "--metrics-input",
+            str(metrics_path),
+            "--loadgenerator-stats",
+            str(loadgenerator_stats_path),
+            "--summary-output",
+            str(summary_path),
+            "--summary-store",
+            str(summary_store_path),
+            "--environment",
+            self.config.environment,
+            "--machine-type",
+            self.config.machine_type,
+            "--processor-family",
+            self.config.processor_family,
+            "--architecture",
+            self.config.architecture,
+            "--cloud-provider",
+            self.config.cloud_provider,
+            "--region",
+            self.config.region,
+            "--zone",
+            self.config.zone,
+            "--node-count",
+            str(self.config.node_count),
+            "--pricing-model",
+            self.config.pricing_model,
+            "--concurrent-users",
+            self.config.concurrent_users,
+            "--users-per-second",
+            self.config.users_per_second,
+            "--load-profile-source",
+            self.config.load_profile_source,
+            "--min-coverage-ratio",
+            str(self.config.min_coverage_ratio),
+            "--strict",
+        ]
+        if self.config.replace_summary:
+            summary_command.append("--replace")
+        self.runner.run(summary_command, cwd=REPO_ROOT)
         self.runner.run(
             [
                 sys.executable,
@@ -704,7 +893,42 @@ class LocalBenchmark:
         )
         self.load_summary_to_bigquery(summary_store_path)
 
+    def capture_loadgenerator_logs(self, output_path: Path) -> str:
+        """Capture completed loadgenerator logs, preferring previous container logs."""
+        base_command = [
+            "kubectl",
+            "logs",
+            "deployment/loadgenerator",
+            "--namespace",
+            self.config.namespace,
+            "--context",
+            self.config.kube_context,
+        ]
+        previous = self.runner.run(
+            [*base_command, "--previous"],
+            check=False,
+            capture=True,
+        )
+        if previous.returncode == 0 and "Aggregated" in previous.stdout:
+            output_path.write_text(previous.stdout, encoding="utf-8")
+            return "previous"
+        current = self.runner.run(base_command, capture=True)
+        output_path.write_text(current.stdout, encoding="utf-8")
+        return "current"
+
     def load_summary_to_bigquery(self, summary_store_path: Path) -> None:
+        """Load summary to bigquery.
+
+
+        Args:
+            summary_store_path: summary store path (Path) used by this operation.
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if not self.config.persist_bigquery:
             return
         result = self.runner.run(
@@ -744,6 +968,15 @@ class LocalBenchmark:
 
     @contextmanager
     def port_forward_prometheus(self):
+        """Compute port forward Prometheus.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         command = [
             "kubectl",
             "port-forward",
@@ -786,6 +1019,12 @@ class LocalBenchmark:
                 process.wait(timeout=10)
 
     def cleanup(self) -> Exception | None:
+        """Compute cleanup.
+
+
+        Returns:
+            Exception | None value produced by cleanup.
+        """
         if self.config.skip_destroy:
             self.write_teardown_status(False, 0, "skipped")
             self.config.destroy_attempted = "false"
@@ -799,6 +1038,16 @@ class LocalBenchmark:
         return destroy_error
 
     def capture_teardown_check(self, filename: str, label: str) -> None:
+        """Capture teardown check.
+
+
+        Args:
+            filename: filename (str) used by this operation.
+            label: label (str) used by this operation.
+
+        Returns:
+            None.
+        """
         path = self.config.artifacts_dir / filename
         with path.open("w", encoding="utf-8") as handle:
             handle.write(f"teardown_{label}_started_at={utc_now()}\n")
@@ -841,6 +1090,12 @@ class LocalBenchmark:
         )
 
     def helm_cleanup(self) -> None:
+        """Compute helm cleanup.
+
+
+        Returns:
+            None.
+        """
         path = self.config.artifacts_dir / "helm-cleanup.log"
         with path.open("w", encoding="utf-8") as handle:
             handle.write(f"helm_cleanup_started_at={utc_now()}\n")
@@ -869,6 +1124,12 @@ class LocalBenchmark:
             )
 
     def terraform_destroy(self) -> Exception | None:
+        """Compute terraform destroy.
+
+
+        Returns:
+            Exception | None value produced by terraform destroy.
+        """
         path = self.config.artifacts_dir / "teardown-destroy.log"
         with path.open("w", encoding="utf-8") as handle:
             handle.write(f"destroy_started_at={utc_now()}\n")
@@ -901,6 +1162,17 @@ class LocalBenchmark:
     def write_teardown_status(
         self, attempted: bool, exit_code: int, succeeded: str
     ) -> None:
+        """Write teardown status.
+
+
+        Args:
+            attempted: attempted (bool) used by this operation.
+            exit_code: exit code (int) used by this operation.
+            succeeded: succeeded (str) used by this operation.
+
+        Returns:
+            None.
+        """
         self.config.destroy_attempted = bool_string(attempted)
         self.config.destroy_succeeded = succeeded
         write_env_file(
@@ -916,6 +1188,16 @@ class LocalBenchmark:
     def write_provision_status(
         self, values: dict[str, str], *, append: bool = False
     ) -> None:
+        """Write provision status.
+
+
+        Args:
+            values: values (dict[str, str]) used by this operation.
+            append: append (bool) used by this operation.
+
+        Returns:
+            None.
+        """
         path = self.config.artifacts_dir / "provision-status.env"
         mode = "a" if append else "w"
         with path.open(mode, encoding="utf-8") as handle:
@@ -923,6 +1205,12 @@ class LocalBenchmark:
                 handle.write(f"{key}={value}\n")
 
     def write_trace(self) -> None:
+        """Write trace.
+
+
+        Returns:
+            None.
+        """
         artifacts_dir = self.config.artifacts_dir
         summary_path = artifacts_dir / "benchmark-summary.json"
         summary_store_path = artifacts_dir / "benchmark-summaries.ndjson"
@@ -930,7 +1218,7 @@ class LocalBenchmark:
         bigquery_summary_table = self.bigquery_summary_table
         bigquery_load_report_path = self.bigquery_load_report_path
         trace = {
-            "github": {},
+            "GitHub": {},
             "benchmark": {
                 "run_id": self.config.run_id,
                 "environment": self.config.environment,
@@ -1019,6 +1307,18 @@ class LocalBenchmark:
         )
 
     def fail_if_requested(self, stage: str) -> None:
+        """Compute fail if requested.
+
+
+        Args:
+            stage: stage (str) used by this operation.
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if self.config.failure_stage == stage:
             raise LocalBenchmarkError(
                 f"Controlled failure requested with failure_stage={stage}."
@@ -1026,10 +1326,22 @@ class LocalBenchmark:
 
     @property
     def bigquery_load_report_path(self) -> Path:
+        """Compute BigQuery load report path.
+
+
+        Returns:
+            Path value produced by BigQuery load report path.
+        """
         return self.config.artifacts_dir / "bigquery-load-report.json"
 
     @property
     def bigquery_summary_table(self) -> str:
+        """Compute BigQuery summary table.
+
+
+        Returns:
+            str value produced by BigQuery summary table.
+        """
         if not (
             self.config.bigquery_project_id
             and self.config.bigquery_dataset
@@ -1044,6 +1356,18 @@ class LocalBenchmark:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Run the SiliconBoutique benchmark flow against local Kubernetes."
     )
@@ -1096,9 +1420,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Leave the Terraform-owned namespace in place for debugging.",
     )
     parser.add_argument(
+        "--replace-summary",
+        action="store_true",
+        help="Replace an existing local summary-store row with the same run_id.",
+    )
+    parser.add_argument(
         "--persist-bigquery",
         action="store_true",
-        help="Preflight and load the generated local benchmark summary row into BigQuery.",
+        help="Preflight and load the generated local benchmark summary row into bigquery.",
     )
     parser.add_argument(
         "--bigquery-env-file",
@@ -1116,6 +1445,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        parser: parser (argparse.ArgumentParser) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not RUN_ID_PATTERN.match(args.run_id) or len(args.run_id) > 46:
         parser.error("--run-id must be lowercase DNS-safe and at most 46 characters")
     if args.node_count < 1:
@@ -1147,6 +1489,15 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
+    """Compute config from arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        BenchmarkConfig value produced by config from arguments.
+    """
     env_values = getattr(args, "_bigquery_env_values", None)
     if env_values is None and getattr(args, "persist_bigquery", False):
         env_values = read_env_file(args.bigquery_env_file)
@@ -1194,6 +1545,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         min_coverage_ratio=args.min_coverage_ratio,
         failure_stage=args.failure_stage,
         skip_destroy=args.skip_destroy,
+        replace_summary=args.replace_summary,
         persist_bigquery=args.persist_bigquery,
         bigquery_env_file=args.bigquery_env_file,
         bigquery_project_id=bigquery["project_id"],
@@ -1204,6 +1556,15 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
 
 
 def load_profile_from_file(path: Path | None) -> dict[str, Any]:
+    """Load profile from file.
+
+
+    Args:
+        path: path (Path | None) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by load profile from file.
+    """
     if path is None:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1213,6 +1574,18 @@ def load_profile_from_file(path: Path | None) -> dict[str, Any]:
 
 
 def read_env_file(path: Path | None) -> dict[str, str]:
+    """Read environment file.
+
+
+    Args:
+        path: path (Path | None) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by read environment file.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if path is None or not path.exists():
         return {}
     values: dict[str, str] = {}
@@ -1233,12 +1606,30 @@ def read_env_file(path: Path | None) -> dict[str, str]:
 
 
 def unquote_env_value(value: str) -> str:
+    """Compute unquote environment value.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by unquote environment value.
+    """
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
 
 
 def apply_env_values(values: dict[str, str]) -> None:
+    """Apply environment values.
+
+
+    Args:
+        values: values (dict[str, str]) used by this operation.
+
+    Returns:
+        None.
+    """
     for key, value in values.items():
         os.environ.setdefault(key, value)
 
@@ -1246,7 +1637,27 @@ def apply_env_values(values: dict[str, str]) -> None:
 def resolve_bigquery_settings(
     args: argparse.Namespace, env_values: dict[str, str]
 ) -> dict[str, str]:
+    """Compute resolve BigQuery settings.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        env_values: environment values (dict[str, str]) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by resolve BigQuery settings.
+    """
     def value(cli_value: str | None, *env_names: str) -> str:
+        """Compute value.
+
+
+        Args:
+            cli_value: cLI value (str | None) used by this operation.
+            env_names: environment names (str) used by this operation.
+
+        Returns:
+            str value produced by value.
+        """
         if cli_value:
             return cli_value.strip()
         for name in env_names:
@@ -1267,26 +1678,28 @@ def resolve_bigquery_settings(
     }
 
 
-def parse_duration_seconds(value: str) -> int:
-    if re.fullmatch(r"[1-9][0-9]*", value):
-        return int(value)
-    match = re.fullmatch(r"([1-9][0-9]*)([smh])", value)
-    if not match:
-        raise ValueError("test_duration must be a positive number of seconds, Ns, Nm, or Nh")
-    amount = int(match.group(1))
-    unit = match.group(2)
-    if unit == "s":
-        return amount
-    if unit == "m":
-        return amount * 60
-    return amount * 3600
-
-
 def default_run_id() -> str:
-    return datetime.now(timezone.utc).strftime("local-%Y%m%d%H%M%S")
+    """Compute default run ID.
+
+
+    Returns:
+        str value produced by default run ID.
+    """
+    return datetime.now(timezone.utc).strftime("local-smoke-%Y%m%d-%H%M%S")
 
 
 def output_value(outputs: dict[str, Any], name: str, default: Any) -> Any:
+    """Compute output value.
+
+
+    Args:
+        outputs: outputs (dict[str, Any]) used by this operation.
+        name: name (str) used by this operation.
+        default: default (Any) used by this operation.
+
+    Returns:
+        Any value produced by output value.
+    """
     value = outputs.get(name)
     if isinstance(value, dict) and "value" in value:
         return value["value"]
@@ -1294,6 +1707,15 @@ def output_value(outputs: dict[str, Any], name: str, default: Any) -> Any:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     benchmark = LocalBenchmark(config_from_args(args))
     return benchmark.run()

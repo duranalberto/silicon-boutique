@@ -12,14 +12,40 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import write_json
+
 
 @dataclass(frozen=True)
 class TrialInput:
+    """Container for trial Input state and behavior.
+
+
+    Attributes:
+        avg_cpu_utilization_pct: avg CPU utilization pct (float) stored on the object.
+        request_failure_ratio: request failure ratio (float) stored on the object.
+    """
     avg_cpu_utilization_pct: float
     request_failure_ratio: float = 0.0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Find a reusable SiliconBoutique load profile."
     )
@@ -69,6 +95,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args()
     if args.fixture_trials:
         observations = load_fixture_trials(args.fixture_trials)
@@ -101,6 +133,22 @@ def calibrate_from_observations(
     max_failure_ratio: float,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Compute calibrate from observations.
+
+
+    Args:
+        observations: observations (list[TrialInput]) used by this operation.
+        initial_concurrent_users: initial concurrent users (int) used by this operation.
+        initial_users_per_second: initial users per second (float) used by this operation.
+        target_min_cpu_pct: target min CPU pct (float) used by this operation.
+        target_max_cpu_pct: target max CPU pct (float) used by this operation.
+        max_trials: max trials (int) used by this operation.
+        max_failure_ratio: max failure ratio (float) used by this operation.
+        metadata: metadata (dict[str, Any] | None) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by calibrate from observations.
+    """
     concurrent_users = initial_concurrent_users
     users_per_second = initial_users_per_second
     trials: list[dict[str, Any]] = []
@@ -131,6 +179,15 @@ def calibrate_from_observations(
 
 
 def calibrate_with_local_runs(args: argparse.Namespace) -> dict[str, Any]:
+    """Compute calibrate with local runs.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by calibrate with local runs.
+    """
     observations: list[TrialInput] = []
     concurrent_users = args.initial_concurrent_users
     users_per_second = args.initial_users_per_second
@@ -192,6 +249,15 @@ def calibrate_with_local_runs(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def calibrate_with_gcp_workflows(args: argparse.Namespace) -> dict[str, Any]:
+    """Compute calibrate with GCP workflows.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by calibrate with GCP workflows.
+    """
     concurrent_users = args.initial_concurrent_users
     users_per_second = args.initial_users_per_second
     trials: list[dict[str, Any]] = []
@@ -255,6 +321,18 @@ def calibrate_with_gcp_workflows(args: argparse.Namespace) -> dict[str, Any]:
 def gcp_workflow_command(
     *, args: argparse.Namespace, run_id: str, concurrent_users: int, users_per_second: float
 ) -> list[str]:
+    """Compute GCP workflow command.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        run_id: run ID (str) used by this operation.
+        concurrent_users: concurrent users (int) used by this operation.
+        users_per_second: users per second (float) used by this operation.
+
+    Returns:
+        list[str] value produced by GCP workflow command.
+    """
     return [
         "gh",
         "workflow",
@@ -296,6 +374,16 @@ def gcp_workflow_command(
 
 
 def calibration_metadata(args: argparse.Namespace, mode: str) -> dict[str, Any]:
+    """Compute calibration metadata.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        mode: mode (str) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by calibration metadata.
+    """
     return {
         "mode": mode,
         "machine_type": args.machine_type,
@@ -317,6 +405,22 @@ def build_trial(
     target_max_cpu_pct: float,
     max_failure_ratio: float,
 ) -> dict[str, Any]:
+    """Build trial.
+
+
+    Args:
+        index: index (int) used by this operation.
+        source_run_id: source run ID (str | None) used by this operation.
+        concurrent_users: concurrent users (int) used by this operation.
+        users_per_second: users per second (float) used by this operation.
+        observation: observation (TrialInput) used by this operation.
+        target_min_cpu_pct: target min CPU pct (float) used by this operation.
+        target_max_cpu_pct: target max CPU pct (float) used by this operation.
+        max_failure_ratio: max failure ratio (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build trial.
+    """
     if observation.request_failure_ratio > max_failure_ratio:
         decision = "reject_failures"
     elif target_min_cpu_pct <= observation.avg_cpu_utilization_pct <= target_max_cpu_pct:
@@ -339,6 +443,17 @@ def build_trial(
 def next_profile(
     *, concurrent_users: int, users_per_second: float, decision: str
 ) -> tuple[int, float]:
+    """Compute next profile.
+
+
+    Args:
+        concurrent_users: concurrent users (int) used by this operation.
+        users_per_second: users per second (float) used by this operation.
+        decision: decision (str) used by this operation.
+
+    Returns:
+        tuple[int, float] value produced by next profile.
+    """
     if decision == "increase_load":
         return max(1, int(round(concurrent_users * 1.5))), round(users_per_second * 1.5, 6)
     if decision in {"decrease_load", "reject_failures"}:
@@ -353,6 +468,18 @@ def calibration_report(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Compute calibration report.
+
+
+    Args:
+        status: status (str) used by this operation.
+        trials: trials (list[dict[str, Any]]) used by this operation.
+        selected: selected (dict[str, Any] | None) used by this operation.
+        metadata: metadata (dict[str, Any] | None) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by calibration report.
+    """
     selected_profile = None
     if selected:
         selected_profile = {
@@ -377,6 +504,18 @@ def closer_to_target(
     target_min_cpu_pct: float,
     target_max_cpu_pct: float,
 ) -> dict[str, Any]:
+    """Compute closer to target.
+
+
+    Args:
+        current: current (dict[str, Any] | None) used by this operation.
+        candidate: candidate (dict[str, Any]) used by this operation.
+        target_min_cpu_pct: target min CPU pct (float) used by this operation.
+        target_max_cpu_pct: target max CPU pct (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by closer to target.
+    """
     if current is None:
         return candidate
     midpoint = (target_min_cpu_pct + target_max_cpu_pct) / 2
@@ -386,6 +525,18 @@ def closer_to_target(
 
 
 def load_fixture_trials(path: Path) -> list[TrialInput]:
+    """Load fixture trials.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[TrialInput] value produced by load fixture trials.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise SystemExit("--fixture-trials must contain a JSON array")
@@ -399,14 +550,18 @@ def load_fixture_trials(path: Path) -> list[TrialInput]:
 
 
 def failure_ratio_from_summary(summary: dict[str, Any]) -> float:
+    """Compute failure ratio from summary.
+
+
+    Args:
+        summary: summary (dict[str, Any]) used by this operation.
+
+    Returns:
+        float value produced by failure ratio from summary.
+    """
     total = summary.get("request_count_total") or 0
     failures = summary.get("request_failure_count") or 0
     return float(failures) / float(total) if total else 1.0
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

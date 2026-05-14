@@ -1,3 +1,5 @@
+"""Tests for test online boutique post renderer."""
+
 import re
 import subprocess
 import sys
@@ -13,7 +15,15 @@ POST_RENDERER = CHART / "post-renderer.py"
 
 
 class OnlineBoutiquePostRendererTest(unittest.TestCase):
+    """Unit tests covering online Boutique Post Renderer behavior.
+    """
     def test_local_x86_render_injects_metadata_and_load_settings(self):
+        """Verify local x86 render injects metadata and load settings.
+
+
+        Returns:
+            None.
+        """
         documents = render_chart(
             run_id="local-render",
             environment="local",
@@ -51,6 +61,12 @@ class OnlineBoutiquePostRendererTest(unittest.TestCase):
         )
 
     def test_gcp_arm_render_injects_metadata_and_load_settings(self):
+        """Verify GCP arm render injects metadata and load settings.
+
+
+        Returns:
+            None.
+        """
         documents = render_chart(
             run_id="gcp-render",
             environment="gcp",
@@ -88,6 +104,12 @@ class OnlineBoutiquePostRendererTest(unittest.TestCase):
         )
 
     def test_post_renderer_requires_metadata_configmap(self):
+        """Verify post renderer requires metadata configmap.
+
+
+        Returns:
+            None.
+        """
         result = subprocess.run(
             [sys.executable, str(POST_RENDERER)],
             input="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: unrelated\n",
@@ -104,6 +126,12 @@ class OnlineBoutiquePostRendererTest(unittest.TestCase):
         )
 
     def test_post_renderer_updates_existing_env_and_preserves_sidecar(self):
+        """Verify post renderer updates existing environment and preserves sidecar.
+
+
+        Returns:
+            None.
+        """
         rendered = subprocess.run(
             [sys.executable, str(POST_RENDERER)],
             input=metadata_configmap()
@@ -165,6 +193,25 @@ def render_chart(
     users_per_second,
     test_duration,
 ):
+    """Render chart.
+
+
+    Args:
+        run_id: run ID used by this operation.
+        environment: environment used by this operation.
+        machine_type: machine type used by this operation.
+        processor_family: processor family used by this operation.
+        architecture: architecture used by this operation.
+        concurrent_users: concurrent users used by this operation.
+        users_per_second: users per second used by this operation.
+        test_duration: test duration used by this operation.
+
+    Returns:
+        Result produced by render chart.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     helm = subprocess.run(
         [
             "helm",
@@ -213,6 +260,12 @@ def render_chart(
 
 
 def metadata_configmap():
+    """Compute metadata configmap.
+
+
+    Returns:
+        Result produced by metadata configmap.
+    """
     return """apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -228,6 +281,17 @@ data:
 
 
 def assert_rendered_metadata(testcase, documents, *, expected_labels):
+    """Assert that rendered metadata matches expectations.
+
+
+    Args:
+        testcase: testcase used by this operation.
+        documents: documents used by this operation.
+        expected_labels: expected labels used by this operation.
+
+    Returns:
+        None.
+    """
     expected_annotations = {
         "silicon-boutique/teardown-owner": "helm",
         "silicon-boutique/teardown-rule": "uninstall-before-terraform-destroy",
@@ -277,6 +341,17 @@ def assert_rendered_metadata(testcase, documents, *, expected_labels):
 
 
 def assert_loadgenerator_env(testcase, documents, expected_env):
+    """Assert that loadgenerator environment matches expectations.
+
+
+    Args:
+        testcase: testcase used by this operation.
+        documents: documents used by this operation.
+        expected_env: expected environment used by this operation.
+
+    Returns:
+        None.
+    """
     loadgenerator = find_document(documents, "Deployment", "loadgenerator")
     testcase.assertIsNotNone(loadgenerator)
 
@@ -289,6 +364,18 @@ def assert_loadgenerator_env(testcase, documents, expected_env):
 
 
 def assert_mapping_contains(testcase, expected, actual, label):
+    """Assert that mapping contains matches expectations.
+
+
+    Args:
+        testcase: testcase used by this operation.
+        expected: expected used by this operation.
+        actual: actual used by this operation.
+        label: label used by this operation.
+
+    Returns:
+        None.
+    """
     for key, expected_value in expected.items():
         testcase.assertEqual(
             actual.get(key),
@@ -298,6 +385,17 @@ def assert_mapping_contains(testcase, expected, actual, label):
 
 
 def find_document(documents, kind, name):
+    """Find document.
+
+
+    Args:
+        documents: documents used by this operation.
+        kind: kind used by this operation.
+        name: name used by this operation.
+
+    Returns:
+        Result produced by find document.
+    """
     for document in documents:
         lines = document.splitlines()
         if scalar_at_top_level(lines, "kind") == kind and metadata_name(lines) == name:
@@ -306,12 +404,31 @@ def find_document(documents, kind, name):
 
 
 def document_identity(lines):
+    """Compute document identity.
+
+
+    Args:
+        lines: lines used by this operation.
+
+    Returns:
+        Result produced by document identity.
+    """
     kind = scalar_at_top_level(lines, "kind") or "Unknown"
     name = metadata_name(lines) or "unnamed"
     return f"{kind}/{name}"
 
 
 def scalar_at_top_level(lines, key):
+    """Compute scalar at top level.
+
+
+    Args:
+        lines: lines used by this operation.
+        key: key used by this operation.
+
+    Returns:
+        Result produced by scalar at top level.
+    """
     pattern = re.compile(rf"^{re.escape(key)}:\s*(.+?)\s*$")
     for line in lines:
         match = pattern.match(line)
@@ -321,10 +438,29 @@ def scalar_at_top_level(lines, key):
 
 
 def metadata_name(lines):
+    """Compute metadata name.
+
+
+    Args:
+        lines: lines used by this operation.
+
+    Returns:
+        Result produced by metadata name.
+    """
     return mapping_at_path(lines, ("metadata",)).get("name")
 
 
 def mapping_at_path(lines, path):
+    """Compute mapping at path.
+
+
+    Args:
+        lines: lines used by this operation.
+        path: path used by this operation.
+
+    Returns:
+        Result produced by mapping at path.
+    """
     index = find_section(lines, path)
     if index is None:
         return {}
@@ -343,6 +479,16 @@ def mapping_at_path(lines, path):
 
 
 def find_section(lines, path):
+    """Find section.
+
+
+    Args:
+        lines: lines used by this operation.
+        path: path used by this operation.
+
+    Returns:
+        Result produced by find section.
+    """
     start = 0
     end = len(lines)
     expected_indent = 0
@@ -365,6 +511,17 @@ def find_section(lines, path):
 
 
 def named_list_item(lines, path, name):
+    """Compute named list item.
+
+
+    Args:
+        lines: lines used by this operation.
+        path: path used by this operation.
+        name: name used by this operation.
+
+    Returns:
+        Result produced by named list item.
+    """
     index = find_section(lines, path)
     if index is None:
         return None
@@ -379,6 +536,16 @@ def named_list_item(lines, path, name):
 
 
 def env_mapping_for_item(lines, item_bounds):
+    """Compute environment mapping for item.
+
+
+    Args:
+        lines: lines used by this operation.
+        item_bounds: item bounds used by this operation.
+
+    Returns:
+        Result produced by environment mapping for item.
+    """
     item_start, item_end = item_bounds
     env_index = None
     for index in range(item_start + 1, item_end):
@@ -415,6 +582,17 @@ def env_mapping_for_item(lines, item_bounds):
 
 
 def list_item_end(lines, start, end):
+    """Compute list item end.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+        end: end used by this operation.
+
+    Returns:
+        Result produced by list item end.
+    """
     indent = leading_spaces(lines[start])
     for index in range(start + 1, end):
         if re.match(rf"^ {{{indent}}}-\s+", lines[index]):
@@ -423,6 +601,15 @@ def list_item_end(lines, start, end):
 
 
 def unquote(value):
+    """Compute unquote.
+
+
+    Args:
+        value: value used by this operation.
+
+    Returns:
+        Result produced by unquote.
+    """
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
         return value[1:-1]

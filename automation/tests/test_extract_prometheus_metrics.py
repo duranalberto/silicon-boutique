@@ -1,3 +1,5 @@
+"""Tests for test extract Prometheus metrics."""
+
 import json
 import subprocess
 import sys
@@ -12,7 +14,18 @@ FIXTURES = REPO_ROOT / "automation" / "tests" / "fixtures" / "prometheus"
 
 
 class ExtractPrometheusMetricsTest(unittest.TestCase):
+    """Unit tests covering extract Prometheus Metrics behavior.
+    """
     def run_extractor(self, *extra_args):
+        """Run extractor.
+
+
+        Args:
+            extra_args: extra arguments used by this operation.
+
+        Returns:
+            Result produced by run extractor.
+        """
         result = subprocess.run(
             [
                 sys.executable,
@@ -39,6 +52,12 @@ class ExtractPrometheusMetricsTest(unittest.TestCase):
         return json.loads(result.stdout)
 
     def test_extracts_deterministic_structured_metrics(self):
+        """Verify extracts deterministic structured metrics.
+
+
+        Returns:
+            None.
+        """
         payload = self.run_extractor()
 
         self.assertEqual(payload["run_id"], "test-run")
@@ -66,7 +85,24 @@ class ExtractPrometheusMetricsTest(unittest.TestCase):
         self.assertAlmostEqual(latency["p95"], 0.46)
         self.assertAlmostEqual(latency["p99"], 0.492)
 
+    def test_step_duration_accepts_shared_millisecond_parser(self):
+        """Verify step duration accepts shared millisecond parser.
+
+
+        Returns:
+            None.
+        """
+        payload = self.run_extractor("--step", "1500ms")
+
+        self.assertEqual(payload["window"]["step_seconds"], 1)
+
     def test_strict_mode_fails_when_required_metric_is_empty(self):
+        """Verify strict mode fails when required metric is empty.
+
+
+        Returns:
+            None.
+        """
         empty_fixture_dir = FIXTURES / "empty"
         result = subprocess.run(
             [
@@ -95,6 +131,12 @@ class ExtractPrometheusMetricsTest(unittest.TestCase):
         self.assertIn("required metrics are missing, empty, or invalid", result.stderr)
 
     def test_strict_mode_writes_output_before_failing(self):
+        """Verify strict mode writes output before failing.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "metrics.json"
             result = subprocess.run(

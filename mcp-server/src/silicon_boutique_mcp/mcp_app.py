@@ -43,6 +43,18 @@ class AdapterResolver:
         adapter_mode: str | None = None,
         env: Mapping[str, str] | None = None,
     ):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            run_controller: run controller (BenchmarkRunController | None) used by this operation.
+            history_store: history store (BenchmarkHistoryStore | None) used by this operation.
+            adapter_mode: adapter mode (str | None) used by this operation.
+            env: environment (Mapping[str, str] | None) used by this operation.
+
+        Returns:
+            None.
+        """
         self._run_controller = run_controller
         self._history_store = history_store
         self.env = env if env is not None else os.environ
@@ -53,6 +65,15 @@ class AdapterResolver:
         )
 
     def run_controller(self) -> BenchmarkRunController:
+        """Run controller.
+
+
+        Returns:
+            BenchmarkRunController value produced by run controller.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if self._run_controller is not None:
             return self._run_controller
         if self.adapter_mode == ADAPTER_MODE_FIXTURE:
@@ -65,6 +86,15 @@ class AdapterResolver:
         raise ToolError(f"unsupported MCP adapter mode: {self.adapter_mode}")
 
     def history_store(self) -> BenchmarkHistoryStore:
+        """Compute history store.
+
+
+        Returns:
+            BenchmarkHistoryStore value produced by history store.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if self._history_store is not None:
             return self._history_store
         if self.adapter_mode == ADAPTER_MODE_FIXTURE:
@@ -77,6 +107,12 @@ class AdapterResolver:
         raise ToolError(f"unsupported MCP adapter mode: {self.adapter_mode}")
 
     def trigger_supported(self) -> bool:
+        """Trigger supported.
+
+
+        Returns:
+            bool value produced by trigger supported.
+        """
         return self.adapter_mode != ADAPTER_MODE_FIXTURE or self._run_controller is not None
 
 
@@ -87,7 +123,21 @@ def build_mcp_app(
     adapter_mode: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> FastMCP:
-    """Build the FastMCP stdio server around the existing service core."""
+    """Build mCP app.
+
+
+    Args:
+        run_controller: run controller (BenchmarkRunController | None) used by this operation.
+        history_store: history store (BenchmarkHistoryStore | None) used by this operation.
+        adapter_mode: adapter mode (str | None) used by this operation.
+        env: environment (Mapping[str, str] | None) used by this operation.
+
+    Returns:
+        FastMCP value produced by build MCP app.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     resolver = AdapterResolver(
         run_controller=run_controller,
         history_store=history_store,
@@ -118,6 +168,30 @@ def build_mcp_app(
         pricing_model: str = "spot",
         cpu_platform: str | None = None,
     ) -> dict[str, object]:
+        """Trigger tool.
+
+
+        Args:
+            cloud_provider: cloud provider (str) used by this operation.
+            project_id: project ID (str) used by this operation.
+            region: region (str) used by this operation.
+            zone: zone (str) used by this operation.
+            machine_type: machine type (str) used by this operation.
+            node_count: node count (int) used by this operation.
+            processor_family: processor family (str) used by this operation.
+            architecture: architecture (str) used by this operation.
+            concurrent_users: concurrent users (int) used by this operation.
+            users_per_second: users per second (int) used by this operation.
+            test_duration: test duration (str) used by this operation.
+            pricing_model: pricing model (str) used by this operation.
+            cpu_platform: CPU platform (str | None) used by this operation.
+
+        Returns:
+            dict[str, object] value produced by trigger tool.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if resolver.adapter_mode == ADAPTER_MODE_FIXTURE and run_controller is None:
             raise ToolError("fixture adapter mode does not support trigger_benchmark_run")
         return mcp_tool_result(
@@ -146,6 +220,15 @@ def build_mcp_app(
         description=tool_description("get_benchmark_status"),
     )
     def status_tool(run_id: str) -> dict[str, object]:
+        """Compute status tool.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, object] value produced by status tool.
+        """
         return mcp_tool_result(
             lambda: get_benchmark_status(run_id, resolver.run_controller())
         )
@@ -160,6 +243,18 @@ def build_mcp_app(
         architecture: str | None = None,
         limit: int = 10,
     ) -> dict[str, object]:
+        """Compute history tool.
+
+
+        Args:
+            machine_type: machine type (str | None) used by this operation.
+            processor_family: processor family (str | None) used by this operation.
+            architecture: architecture (str | None) used by this operation.
+            limit: limit (int) used by this operation.
+
+        Returns:
+            dict[str, object] value produced by history tool.
+        """
         return mcp_tool_result(
             lambda: query_historical_metrics(
                 HistoricalMetricsQuery(
@@ -176,6 +271,18 @@ def build_mcp_app(
 
 
 def mcp_tool_result(callback) -> dict[str, object]:
+    """Compute mCP tool result.
+
+
+    Args:
+        callback: callback used by this operation.
+
+    Returns:
+        dict[str, object] value produced by mCP tool result.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return response_to_dict(callback())
     except (ToolContractError, OSError, ValueError, NotImplementedError) as exc:
@@ -183,6 +290,15 @@ def mcp_tool_result(callback) -> dict[str, object]:
 
 
 def tool_description(name: str) -> str:
+    """Compute tool description.
+
+
+    Args:
+        name: name (str) used by this operation.
+
+    Returns:
+        str value produced by tool description.
+    """
     for definition in tool_definitions_as_dicts():
         if definition["name"] == name:
             return str(definition["description"])
@@ -190,11 +306,33 @@ def tool_description(name: str) -> str:
 
 
 def safe_error_message(exc: BaseException) -> str:
+    """Compute safe error message.
+
+
+    Args:
+        exc: exc (BaseException) used by this operation.
+
+    Returns:
+        str value produced by safe error message.
+    """
     message = str(exc) or exc.__class__.__name__
     return message.replace("Authorization", "[redacted]")
 
 
 def required_path(env: Mapping[str, str], name: str) -> Path:
+    """Compute required path.
+
+
+    Args:
+        env: environment (Mapping[str, str]) used by this operation.
+        name: name (str) used by this operation.
+
+    Returns:
+        Path value produced by required path.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     value = env.get(name, "").strip()
     if not value:
         raise ToolError(f"{name} is required for fixture adapter mode")
@@ -202,11 +340,25 @@ def required_path(env: Mapping[str, str], name: str) -> Path:
 
 
 def registered_tool_names(app: FastMCP) -> set[str]:
-    """Return registered tool names for lightweight unit tests."""
+    """Compute registered tool names.
+
+
+    Args:
+        app: app (FastMCP) used by this operation.
+
+    Returns:
+        set[str] value produced by registered tool names.
+    """
     return set(getattr(app._tool_manager, "_tools").keys())  # noqa: SLF001
 
 
 def main() -> None:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        None.
+    """
     build_mcp_app().run(transport="stdio")
 
 

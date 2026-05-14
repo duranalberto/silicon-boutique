@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run or verify the SiliconBoutique multi-cloud acceptance matrix."""
+"""Command-line workflow for run acceptance matrix in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +24,7 @@ SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
 if str(SHARED_SRC) not in sys.path:
     sys.path.insert(0, str(SHARED_SRC))
 
-from silicon_boutique_shared.automation import read_json, write_json
+from silicon_boutique_shared.automation import read_json, utc_now, write_json
 
 
 REPORT_NAME = "acceptance-matrix-report.json"
@@ -34,6 +37,22 @@ SKIPPED_REQUIRES_CREDENTIALS = "skipped_requires_credentials"
 
 @dataclass(frozen=True)
 class MatrixConfig:
+    """Container for matrix Config state and behavior.
+
+
+    Attributes:
+        mode: mode (str) stored on the object.
+        artifacts_dir: artifacts dir (Path) stored on the object.
+        local_artifacts: local artifacts (Path | None) stored on the object.
+        gcp_artifacts: GCP artifacts (Path | None) stored on the object.
+        aws_artifacts: AWS artifacts (Path | None) stored on the object.
+        local_test_duration: local test duration (str) stored on the object.
+        local_min_duration_seconds: local min duration seconds (int) stored on the object.
+        dashboard_hold_seconds: dashboard hold seconds (int) stored on the object.
+        schema: schema (Path) stored on the object.
+        min_duration_seconds: min duration seconds (int) stored on the object.
+        min_coverage_ratio: min coverage ratio (float) stored on the object.
+    """
     mode: str
     artifacts_dir: Path
     local_artifacts: Path | None
@@ -48,10 +67,22 @@ class MatrixConfig:
 
     @property
     def report_path(self) -> Path:
+        """Compute report path.
+
+
+        Returns:
+            Path value produced by report path.
+        """
         return self.artifacts_dir / REPORT_NAME
 
     @property
     def default_local_artifacts(self) -> Path:
+        """Compute default local artifacts.
+
+
+        Returns:
+            Path value produced by default local artifacts.
+        """
         return self.artifacts_dir / "local"
 
 
@@ -60,11 +91,29 @@ class AcceptanceMatrixError(RuntimeError):
 
 
 class AcceptanceMatrix:
+    """Container for acceptance Matrix state and behavior.
+    """
     def __init__(self, config: MatrixConfig, *, runner=subprocess.run) -> None:
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            config: config (MatrixConfig) used by this operation.
+            runner: runner used by this operation.
+
+        Returns:
+            None.
+        """
         self.config = config
         self.runner = runner
 
     def run(self) -> int:
+        """Run the configured operation.
+
+
+        Returns:
+            int value produced by run.
+        """
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         artifacts = self.artifact_paths()
         if self.config.mode in {"local", "full"}:
@@ -81,6 +130,12 @@ class AcceptanceMatrix:
         return 0 if report["status"] == PASSED else 2
 
     def artifact_paths(self) -> dict[str, Path | None]:
+        """Compute artifact paths.
+
+
+        Returns:
+            dict[str, Path | None] value produced by artifact paths.
+        """
         local = self.config.local_artifacts
         if self.config.mode in {"local", "full"} and local is None:
             local = self.config.default_local_artifacts
@@ -91,6 +146,18 @@ class AcceptanceMatrix:
         }
 
     def run_local_acceptance(self, artifacts_dir: Path | None) -> None:
+        """Run local acceptance.
+
+
+        Args:
+            artifacts_dir: artifacts dir (Path | None) used by this operation.
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         if artifacts_dir is None:
             raise AcceptanceMatrixError("local artifacts directory is required")
         command = [
@@ -114,6 +181,15 @@ class AcceptanceMatrix:
             )
 
     def verify_optional_local(self, path: Path | None) -> dict[str, Any]:
+        """Compute verify optional local.
+
+
+        Args:
+            path: path (Path | None) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by verify optional local.
+        """
         if path is None:
             return {"status": SKIPPED_OPTIONAL, "reason": "local artifacts were not supplied"}
         if not path.exists():
@@ -121,6 +197,16 @@ class AcceptanceMatrix:
         return self.verify_artifact_set(path, expected_provider="local", require_bigquery=False)
 
     def verify_cloud(self, provider: str, path: Path | None) -> dict[str, Any]:
+        """Compute verify cloud.
+
+
+        Args:
+            provider: provider (str) used by this operation.
+            path: path (Path | None) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by verify cloud.
+        """
         if path is None:
             return {
                 "status": SKIPPED_REQUIRES_CREDENTIALS,
@@ -136,6 +222,17 @@ class AcceptanceMatrix:
     def verify_artifact_set(
         self, path: Path, *, expected_provider: str, require_bigquery: bool
     ) -> dict[str, Any]:
+        """Compute verify artifact set.
+
+
+        Args:
+            path: path (Path) used by this operation.
+            expected_provider: expected provider (str) used by this operation.
+            require_bigquery: require BigQuery (bool) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by verify artifact set.
+        """
         evidence: dict[str, Any] = {
             "status": PASSED,
             "artifacts_dir": str(path),
@@ -181,8 +278,8 @@ class AcceptanceMatrix:
             errors.append("benchmark summary is not complete")
 
         dashboard = acceptance.get("checks", {}).get("dashboard", {})
-        grafana = dashboard.get("grafana_load_status", {})
-        if acceptance.get("status") != PASSED or grafana.get("status") != PASSED:
+        Grafana = dashboard.get("grafana_load_status", {})
+        if acceptance.get("status") != PASSED or Grafana.get("status") != PASSED:
             errors.append("acceptance report does not prove Grafana dashboard API success")
 
         comparable = comparability.get("comparable_run_ids", [])
@@ -214,6 +311,15 @@ class AcceptanceMatrix:
     def build_multi_cloud_comparison(
         self, verified: dict[str, dict[str, Any]]
     ) -> dict[str, Any]:
+        """Build multi cloud comparison.
+
+
+        Args:
+            verified: verified (dict[str, dict[str, Any]]) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by build multi cloud comparison.
+        """
         cloud_runs = [
             verified[provider]
             for provider in ("gcp", "aws")
@@ -263,6 +369,16 @@ class AcceptanceMatrix:
         verified: dict[str, dict[str, Any]],
         comparison: dict[str, Any],
     ) -> dict[str, Any]:
+        """Build report.
+
+
+        Args:
+            verified: verified (dict[str, dict[str, Any]]) used by this operation.
+            comparison: comparison (dict[str, Any]) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by build report.
+        """
         accepted = [
             run for run in verified.values() if run.get("status") == PASSED
         ]
@@ -312,6 +428,17 @@ def aggregate_required(
     empty_status: str,
     empty_reason: str | None = None,
 ) -> dict[str, Any]:
+    """Aggregate required.
+
+
+    Args:
+        runs: runs (list[dict[str, Any]]) used by this operation.
+        empty_status: empty status (str) used by this operation.
+        empty_reason: empty reason (str | None) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by aggregate required.
+    """
     if not runs:
         payload = {"status": empty_status}
         if empty_reason:
@@ -326,6 +453,18 @@ def aggregate_required(
 
 
 def read_required_json(path: Path) -> dict[str, Any]:
+    """Read required JSON.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by read required JSON.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         raise AcceptanceMatrixError(f"missing required artifact: {path}")
     payload = read_json(path)
@@ -335,12 +474,33 @@ def read_required_json(path: Path) -> dict[str, Any]:
 
 
 def read_optional_json(path: Path) -> dict[str, Any] | None:
+    """Read optional JSON.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        dict[str, Any] | None value produced by read optional JSON.
+    """
     if not path.exists():
         return None
     return read_required_json(path)
 
 
 def read_required_env(path: Path) -> dict[str, str]:
+    """Read required environment.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by read required environment.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         raise AcceptanceMatrixError(f"missing required artifact: {path}")
     values: dict[str, str] = {}
@@ -352,13 +512,19 @@ def read_required_env(path: Path) -> dict[str, str]:
     return values
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Run or verify the SiliconBoutique multi-cloud acceptance matrix."
     )
@@ -386,6 +552,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> MatrixConfig:
+    """Compute config from arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        MatrixConfig value produced by config from arguments.
+    """
     return MatrixConfig(
         mode=args.mode,
         artifacts_dir=args.artifacts_dir,
@@ -402,6 +577,15 @@ def config_from_args(args: argparse.Namespace) -> MatrixConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     try:
         return AcceptanceMatrix(config_from_args(args)).run()

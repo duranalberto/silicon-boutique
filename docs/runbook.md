@@ -1,55 +1,250 @@
 # Runbook
 
-For first-time local setup and day-one usage, start with [`docs/local-usage.md`](local-usage.md). This runbook is the deeper operating reference for local validation, cloud rollout, teardown, and troubleshooting.
+This is the single operator guide for SiliconBoutique setup, local runs, cloud dispatch, BigQuery persistence, dashboards, acceptance evidence, teardown, and troubleshooting.
 
-## Local Development
+## Execute Benchmarks
 
-1. Open the repository in the devcontainer.
-2. Verify the environment has Terraform, kubectl, Helm, Python, Docker, and minikube.
-3. Let the devcontainer bootstrap the local `siliconboutique` minikube profile; the post-create script now checks the toolchain, verifies Docker access, and starts or validates the profile automatically.
-4. Review `docs/spec-driven-development.md` and `docs/project-layout.md`.
-5. Review `docs/architecture.md` and `docs/roadmap.md` for the current pipeline language and phase order.
+Use this section when you need to run a benchmark, store results, or view the dashboard. `automation/scripts/run_benchmark_workflow.py` is the normal operator entrypoint; lower-level scripts are for debugging one layer at a time.
 
-The devcontainer pins the local toolchain baseline:
+### Which Command Should I Run?
 
-| Tool | Baseline |
-| --- | --- |
-| Terraform | 1.15.2 |
-| kubectl | 1.36.0 |
-| Helm | 4.1.4 |
-| minikube | 1.38.1 |
+| Goal | Command | Notes |
+| --- | --- | --- |
+| Local smoke benchmark | `python3 automation/scripts/run_benchmark_workflow.py --target local --profile smoke --bigquery-env-file credential.env` | First command to try in the devcontainer. Generates a unique local smoke `run_id`. |
+| Local benchmark with BigQuery proof | Same local command with a populated `credential.env` and local `bq` credentials | Persists one canonical `BenchmarkSummary` row and validates it remotely. |
+| GCP remote benchmark | `python3 automation/scripts/run_benchmark_workflow.py --target gcp --project-id "$project_id" --bigquery-env-file credential.env` | Dispatches GitHub Actions; does not run cloud Terraform locally. |
+| GCP dispatch only | `python3 automation/scripts/run_benchmark_workflow.py --target gcp --project-id "$project_id" --bigquery-env-file credential.env --no-wait --dashboard skip` | Returns dispatch metadata without waiting for the workflow to finish. |
+| Local dashboard from artifacts | `python3 automation/scripts/launch_metrics_dashboard.py --no-browser` | Reads `artifacts/benchmark-summaries.ndjson`. |
+| Dashboard from BigQuery history | `python3 automation/scripts/launch_metrics_dashboard.py --project-id "$project_id" --dataset-id silicon_boutique --table-id benchmark_summaries --location US --no-browser` | Requires local `bq` credentials with read access. |
+| Debug local layers | `python3 automation/scripts/run_local_benchmark.py --test-duration 2m --min-duration-seconds 60` | Use when isolating Terraform, Helm, Prometheus, or summary generation. |
 
-The managed minikube profile is `siliconboutique`, uses the Docker driver, and runs Kubernetes `v1.35.1`. The devcontainer runs with host networking so minikube can reach the Docker driver SSH and API ports published on `127.0.0.1`.
+AWS is also supported through `--target aws`, but this runbook prioritizes local and GCP execution. Use AWS only in a sandbox account with `AWS_ROLE_TO_ASSUME`, BigQuery writer credentials, and a confirmed teardown window.
 
-Run the reusable check any time the container is rebuilt or the local environment looks suspicious:
+### Prerequisite Checklist
+
+| Area | Check | Command or file |
+| --- | --- | --- |
+| Devcontainer tools | Terraform, kubectl, Helm, Python, Docker, and minikube match the repo baseline | `.devcontainer/verify-toolchain.sh` |
+| Local Kubernetes | The managed minikube profile is reachable | `kubectl get nodes --context siliconboutique` |
+| BigQuery env file | `credential.env` exists and is ignored by git | Copy `credential.env.example` to `credential.env` |
+| BigQuery destination | `PROJECT_ID`, `BIGQUERY_DATASET`, `BIGQUERY_TABLE`, and `BIGQUERY_LOCATION` are set | `credential.env` |
+| Local BigQuery auth | ADC or an ignored service account key can run `bq` queries | `gcloud auth application-default login` then `bq query --nouse_legacy_sql 'SELECT 1'` |
+| Durable BigQuery table | The summary table exists before local or cloud persistence | `infra/terraform/gcp-bigquery` |
+| GitHub Actions dispatch | `gh` can see benchmark workflows | `gh auth status` and `gh workflow view benchmark.yml` |
+| GCP cloud workflow | GitHub secrets exist for GCP OIDC | `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` |
+
+The devcontainer pins Terraform `1.15.2`, kubectl `1.36.0`, Helm `4.1.4`, minikube `1.38.1`, and Kubernetes `v1.35.1` for the local `siliconboutique` profile.
+
+### Configure BigQuery
+
+Create `credential.env` from the safe template and keep actual values untracked:
 
 ```bash
-.devcontainer/verify-toolchain.sh
+cp credential.env.example credential.env
 ```
 
-## Benchmark Execution Flow
+Set these values:
 
-1. Provision the target environment with Terraform.
-2. Deploy the Kubernetes workload and monitoring stack with Helm.
-3. Start the benchmark run.
-4. Collect metrics and produce a summary payload.
-5. Teardown the infrastructure when complete.
+```bash
+PROJECT_ID=your-gcp-project-id
+BIGQUERY_DATASET=silicon_boutique
+BIGQUERY_TABLE=benchmark_summaries
+BIGQUERY_LOCATION=US
+```
 
-## Naming and Labels
+For local BigQuery loads and dashboard queries, authenticate the local `bq` CLI:
 
-Every benchmark run is keyed by one DNS-safe `run_id`. When a caller does not provide one, Terraform generates a stable ID in state. Local resource names use `silicon-boutique-${run_id}`. GCP and AWS resource names use `sb-${run_id}` with provider-specific suffixes where needed.
+```bash
+gcloud auth application-default login
+bq query --nouse_legacy_sql 'SELECT 1'
+```
 
-All label-capable resources must carry the run metadata needed for traceability:
+Provision the durable BigQuery destination before the first load:
 
-- `run_id` or `silicon-boutique/run-id`
-- `environment` or `silicon-boutique/environment`
-- `machine_type` or `silicon-boutique/machine-type`
-- `processor_family` or `silicon-boutique/processor-family`
-- `architecture` or `silicon-boutique/architecture`
-- Canonical summary rows must also include normalized `region`, `zone`, `node_count`, `pricing_model`, `load_profile_source`, and optional `cpu_platform`.
-- Terraform ownership metadata where the platform supports labels or tags
+```bash
+cd infra/terraform/gcp-bigquery
+terraform init
+terraform apply -auto-approve \
+  -var="project_id=$project_id" \
+  -var="static_validation_mode=false"
+```
 
-The Terraform roots expose rendered labels, tags, selectors, and teardown checks through outputs such as `labels`, `tags`, `kubernetes_label_selector`, `gcp_label_filter`, `aws_tag_filter`, and `teardown_check_commands`.
+For GCP workflow writes, also grant the GitHub Actions writer service account:
+
+```bash
+terraform apply -auto-approve \
+  -var="project_id=$project_id" \
+  -var="summary_writer_service_accounts=[\"$GCP_SERVICE_ACCOUNT\"]" \
+  -var="static_validation_mode=false"
+```
+
+`GCP_SERVICE_ACCOUNT` is the service account email stored in the GitHub Actions secret. The BigQuery root grants that identity project-level job access and dataset-level write access for summary loads. BigQuery stores canonical `BenchmarkSummary` rows only; raw Prometheus time-series samples remain run artifacts.
+
+### Run Local Benchmarks
+
+Run the normal local smoke path:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target local \
+  --profile smoke \
+  --bigquery-env-file credential.env
+```
+
+If `credential.env` contains BigQuery settings and local `bq` credentials work, the workflow persists and validates a remote BigQuery row. If BigQuery settings are missing, local execution falls back to local artifacts only.
+
+For direct local debugging with BigQuery persistence:
+
+```bash
+python3 automation/scripts/run_local_benchmark.py \
+  --test-duration 2m \
+  --min-duration-seconds 60 \
+  --persist-bigquery \
+  --bigquery-env-file credential.env
+```
+
+### Run GCP Benchmarks
+
+Dispatch a guarded GCP benchmark and wait for completion:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target gcp \
+  --project-id "$project_id" \
+  --bigquery-env-file credential.env
+```
+
+Dispatch without waiting:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target gcp \
+  --project-id "$project_id" \
+  --bigquery-env-file credential.env \
+  --no-wait \
+  --dashboard skip
+```
+
+The coordinator preflights `gh`, dispatches `.github/workflows/benchmark.yml`, passes `failure_stage=none` and `acceptance_demo=true`, waits by default, downloads the expected artifact, verifies acceptance evidence, and generates dashboard files from BigQuery. The local Python command never applies or destroys GCP Terraform; that happens inside GitHub Actions with shared apply/destroy state.
+
+### View Results and Dashboards
+
+Generate and serve the portable dashboard from local artifacts:
+
+```bash
+python3 automation/scripts/launch_metrics_dashboard.py --no-browser
+```
+
+Generate the portable dashboard from BigQuery history:
+
+```bash
+python3 automation/scripts/launch_metrics_dashboard.py \
+  --project-id "$project_id" \
+  --dataset-id silicon_boutique \
+  --table-id benchmark_summaries \
+  --location US \
+  --no-browser
+```
+
+Use `--no-serve` to write `artifacts/dashboard/index.html` and `artifacts/dashboard/dashboard-data.json` without starting a local server. Add filters such as `--machine-type`, `--processor-family`, `--architecture`, `--cloud-provider`, `--pricing-model`, or `--limit` to narrow local or BigQuery dashboard data.
+
+Verify a persisted BigQuery row by `run_id`:
+
+```bash
+bq query --nouse_legacy_sql \
+  "SELECT run_id, cloud_provider, machine_type, benchmark_start, summary_status
+   FROM \`$project_id.silicon_boutique.benchmark_summaries\`
+   WHERE run_id = '$run_id'"
+```
+
+Audit stored BigQuery history without changing rows:
+
+```bash
+python3 automation/scripts/audit_bigquery_benchmark_summaries.py \
+  --project-id "$project_id" \
+  --dataset-id silicon_boutique \
+  --table-id benchmark_summaries \
+  --location US \
+  --schema automation/templates/benchmark-summary.bigquery-schema.json \
+  --report-output artifacts/bigquery-audit-report.json
+```
+
+The portable dashboard is a generated result viewer for stored benchmark summaries. It is different from the private Grafana dashboard deployed inside the benchmark Kubernetes namespace, which is a live monitoring surface used during the run.
+
+### Execution Diagrams
+
+```mermaid
+flowchart LR
+  dev[Devcontainer] --> mk[minikube siliconboutique]
+  mk --> tf[Terraform namespace]
+  tf --> helm[Helm workload and monitoring]
+  helm --> load[Load generator]
+  helm --> prom[Prometheus metrics]
+  load --> summary[BenchmarkSummary]
+  prom --> summary
+  summary --> local[Local artifacts]
+  summary --> bq[(Optional BigQuery)]
+  local --> dash[Portable dashboard]
+  bq --> dash
+```
+
+```mermaid
+flowchart LR
+  cli[Local CLI] --> gha[GitHub Actions benchmark.yml]
+  gha --> oidc[GCP OIDC auth]
+  oidc --> gke[GKE Terraform environment]
+  gke --> helm[Helm workload and monitoring]
+  helm --> prom[Prometheus and loadgenerator]
+  prom --> summary[BenchmarkSummary]
+  summary --> bq[(BigQuery history)]
+  gha --> artifact[Downloaded workflow artifact]
+  bq --> dash[Portable dashboard]
+  artifact --> verify[Acceptance verification]
+```
+
+```mermaid
+flowchart LR
+  ndjson[Local benchmark-summaries.ndjson] --> compare[Comparison report]
+  bq[(BigQuery benchmark_summaries)] --> compare
+  compare --> dashboard[artifacts/dashboard/index.html]
+  compare --> data[dashboard-data.json]
+```
+
+### Expected Outputs
+
+| Output | Local | GCP |
+| --- | --- | --- |
+| `run_id` | Defaults to `local-smoke-YYYYMMDD-HHMMSS` unless `--run-id` is supplied | GitHub workflow derives `gha-<github-run-id>-<attempt>` |
+| Run-scoped resources | Namespace `silicon-boutique-<run-id>` | Provider resources named/tagged from `sb-<run-id>` |
+| Unified report | `artifacts/unified-workflow/<run-id>/workflow-report.json` | Same path for the coordinator report |
+| Benchmark artifacts | `benchmark-summary.json`, `benchmark-summaries.ndjson`, metrics, load-generator stats, trace, comparability report | Downloaded workflow artifact plus local coordinator report |
+| BigQuery | Optional local persistence when configured | Required for cloud benchmark history |
+| Dashboard files | Generated under `artifacts/unified-workflow/<run-id>/dashboard/` by the coordinator or `artifacts/dashboard/` by direct launcher | Generated from BigQuery history |
+
+All label-capable resources must carry run metadata: `run_id`, `environment`, `machine_type`, `processor_family`, `architecture`, normalized provider location, node count, pricing model, load profile source, and Terraform ownership metadata where supported.
+
+### Lower-Level Debug Commands
+
+Use these only when isolating one layer of the workflow:
+
+```bash
+python3 automation/scripts/run_local_benchmark.py --test-duration 2m --min-duration-seconds 60
+python3 automation/scripts/run_acceptance_demo.py --mode local
+python3 automation/scripts/run_acceptance_matrix.py --mode local
+python3 automation/scripts/launch_metrics_dashboard.py --no-browser
+```
+
+### Troubleshooting Quick Reference
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `kubectl ... no route to host` for `192.168.49.2:8443` | The minikube API server is stopped or kubeconfig points at a stale local profile | Run `.devcontainer/post-create.sh`, then `kubectl get nodes --context siliconboutique`. |
+| `summary store already contains run_id` | A fixed `--run-id` was reused | Prefer omitting `--run-id` for a fresh timestamped ID. Use `--replace-summary` only when intentionally regenerating the same local run. |
+| `kubectl wait ... no matching resources found` for Prometheus | The installed chart labels do not match the automation selector, or the repo/chart version is stale | Pull the current repo version, rerun `helm template`, and verify Prometheus pods use `app.kubernetes.io/name=prometheus` and `operator.prometheus.io/name=sb-monitoring-kube-prometh-prometheus`. |
+| BigQuery auth, schema, or permission errors | Missing `credential.env`, local ADC, table, schema compatibility, or dataset permissions | Check `credential.env`, run `bq query --nouse_legacy_sql 'SELECT 1'`, and validate/provision `infra/terraform/gcp-bigquery`. |
+| `gh` auth or workflow visibility errors | GitHub CLI is not authenticated or cannot see repo workflows | Run `gh auth status`, `gh workflow view benchmark.yml`, and confirm Actions permissions. |
+| Dashboard has no data | No local summary store exists or BigQuery args are incomplete | Run a benchmark first, or provide `--project-id`, `--dataset-id`, `--table-id`, and `--location` together. |
+| Teardown uncertainty after failure | A run may have created namespace or cloud resources before failing | Inspect run-scoped namespace/resources by `run_id`, uploaded teardown artifacts, and Terraform state before manual cleanup. |
 
 ## Local Terraform Validation
 
@@ -71,6 +266,17 @@ terraform destroy -auto-approve
 
 ## Local Benchmark Automation
 
+Use the unified coordinator for the simplest local path:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target local \
+  --profile smoke \
+  --bigquery-env-file credential.env
+```
+
+It writes a unified report under `artifacts/unified-workflow/<run-id>/workflow-report.json` and generates the portable dashboard under the same run directory. When BigQuery settings are not provided, it falls back to the lower-level local benchmark path without remote persistence.
+
 Use the local automation entrypoint when you want the same workflow shape as the GCP benchmark job without dispatching GitHub Actions. The command provisions the local Terraform namespace, deploys workload and monitoring charts, runs the benchmark window, extracts metrics, generates and validates the summary, captures workflow trace artifacts, and tears down the namespace.
 
 ```bash
@@ -81,12 +287,11 @@ For a shorter local smoke run, lower the summary duration threshold to match the
 
 ```bash
 python3 automation/scripts/run_local_benchmark.py \
-  --run-id local-smoke \
   --test-duration 2m \
   --min-duration-seconds 60
 ```
 
-The generated `artifacts/` directory uses the same artifact names as the GitHub workflow, including `prometheus-metrics.json`, `benchmark-summary.json`, `benchmark-summaries.ndjson`, `comparability-report.json`, `workflow-trace.json`, `workflow-trace.env`, and teardown logs. Use `--failure-stage after_provision`, `--failure-stage after_monitoring_ready`, or `--failure-stage before_extract` only to validate cleanup behavior. Use `--skip-destroy` only when intentionally debugging local resources.
+When `--run-id` is omitted, the script creates a unique `local-smoke-YYYYMMDD-HHMMSS` run ID and Terraform derives the matching `silicon-boutique-<run-id>` namespace. The generated `artifacts/` directory uses the same artifact names as the GitHub workflow, including `prometheus-metrics.json`, `benchmark-summary.json`, `benchmark-summaries.ndjson`, `comparability-report.json`, `workflow-trace.json`, `workflow-trace.env`, and teardown logs. Use `--failure-stage after_provision`, `--failure-stage after_monitoring_ready`, or `--failure-stage before_extract` only to validate cleanup behavior. Use `--skip-destroy` only when intentionally debugging local resources.
 
 To inspect the Grafana dashboard after a local automated run, use `--skip-destroy`, port-forward Grafana from the benchmark namespace, and manually clean up the Helm releases plus Terraform namespace when finished.
 
@@ -387,6 +592,7 @@ python3 automation/scripts/generate_benchmark_summary.py \
 
 For GCP summaries, pass `--region`, `--zone`, `--pricing-model`, optional `--cpu-platform`, and `--pricing-table automation/templates/machine-pricing.json` so `benchmark_compute_cost_usd` and `cost_per_1m_requests_usd` are populated from the repo-owned pricing table. The GCP workflow maps `pricing_model=spot` to Spot nodes and `pricing_model=on_demand` to regular on-demand nodes.
 The generated `summary_status` is `complete` when required metric series, derived fields, and load-generator stats are present and `metrics_coverage_ratio` meets the configured minimum coverage ratio. The default coverage floor is `0.95`, matching the summary validator, so a run does not need perfect edge-sample coverage to be eligible for BigQuery loading.
+The local summary store rejects duplicate `run_id` values by default. Prefer a fresh run ID for each benchmark; when intentionally regenerating a local run with `run_local_benchmark.py`, pass `--replace-summary`.
 
 To calibrate local load settings before a comparison run:
 
@@ -512,6 +718,23 @@ terraform plan -refresh=false -input=false
 The AWS root exports the same run metadata used by the GCP workflow, including `cloud_provider=aws`, region, zone, machine type, processor metadata, node count, pricing model, `get_credentials_command`, tags, managed resource names, and teardown check commands. Live AWS execution is handled by `.github/workflows/benchmark-aws.yml` and requires `AWS_ROLE_TO_ASSUME`, the existing GCP OIDC secrets for BigQuery loading, and a confirmed teardown window. Do not run apply or destroy outside a sandbox account without inspecting Terraform state and the run-scoped tags first.
 
 ## GitHub Actions Benchmark Workflow
+
+The unified Python coordinator can dispatch and verify the cloud workflows from one command:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target gcp \
+  --project-id "$project_id" \
+  --bigquery-env-file credential.env
+```
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target aws \
+  --bigquery-env-file credential.env
+```
+
+The coordinator requires BigQuery settings for cloud targets, passes `failure_stage=none` and `acceptance_demo=true`, waits for completion unless `--no-wait` is supplied, downloads the expected artifact, verifies it through `run_acceptance_matrix.py`, and generates dashboard files from BigQuery. It fails fast if `gh` is missing, unauthenticated, or cannot see the selected workflow.
 
 The GCP workflow is `.github/workflows/benchmark.yml`. It exposes the GCP benchmark path through manual `workflow_dispatch`; the MCP trigger adapter uses the same orchestration boundary through the GitHub Actions API.
 
@@ -781,8 +1004,14 @@ timeout 60s terraform plan -refresh=false -input=false -var='project_id=example-
 
 ## Troubleshooting
 
-- If minikube does not start, confirm Docker is available to the devcontainer and that the Docker socket is mounted.
-- If the configured minikube profile has a corrupt or unreadable config, the devcontainer bootstrap deletes and recreates only that named local profile.
-- If the cloud rollout fails, recheck GCP authentication, project selection, and Terraform provider settings.
-- If Terraform fails, inspect state and provider configuration first.
-- If Kubernetes resources do not appear, verify the cluster context and namespace.
+Start with the [Troubleshooting Quick Reference](#troubleshooting-quick-reference) near the top of this runbook. For deeper triage, inspect the run-scoped artifacts before rerunning:
+
+| Area | Where to look | What to verify |
+| --- | --- | --- |
+| Unified coordinator | `artifacts/unified-workflow/<run-id>/workflow-report.json` | Failed step, rendered command, stdout/stderr preview, selected target, and dashboard output path. |
+| Local workflow with BigQuery | `artifacts/local-workflow/<run-id>/issue-report.json` and `workflow.log` | Toolchain check, minikube repair, BigQuery preflight, local benchmark step, and remote row validation. |
+| Local benchmark debug path | `artifacts/benchmark-summary.json`, `artifacts/comparability-report.json`, `artifacts/workflow-trace.json` | Summary quality, metric coverage, run metadata, and teardown status. |
+| Cloud workflow | Downloaded GitHub Actions artifact and job logs | BigQuery preflight, Terraform apply/destroy, Helm rollout, metric extraction, BigQuery load report, and teardown evidence. |
+| BigQuery history | `bigquery-load-report.json` and `bq query` | Schema compatibility, duplicate `run_id`, writer permissions, and loaded row status. |
+
+Do not manually delete cloud or local resources until you have confirmed the `run_id`, provider project/account, namespace or resource labels, and Terraform state. Durable BigQuery history is not run-scoped teardown infrastructure.

@@ -141,7 +141,12 @@ TOOL_DEFINITIONS = (
 
 
 def tool_definitions_as_dicts() -> list[dict[str, object]]:
-    """Return all exposed tool contracts as JSON-ready dictionaries."""
+    """Compute tool definitions as dicts.
+
+
+    Returns:
+        list[dict[str, object]] value produced by tool definitions as dicts.
+    """
     return [tool.to_dict() for tool in TOOL_DEFINITIONS]
 
 
@@ -187,14 +192,33 @@ def query_historical_metrics(
 
 
 def response_to_dict(response: object) -> dict[str, object]:
-    """Render dataclass operation responses as JSON-ready dictionaries."""
+    """Compute response to dict.
+
+
+    Args:
+        response: response (object) used by this operation.
+
+    Returns:
+        dict[str, object] value produced by response to dict.
+    """
     if hasattr(response, "to_dict"):
         return response.to_dict()  # type: ignore[no-any-return]
     return asdict(response)  # type: ignore[arg-type]
 
 
 def validate_benchmark_run_request(request: BenchmarkRunRequest) -> None:
-    """Validate the P9.1 production benchmark trigger contract."""
+    """Validate benchmark run request.
+
+
+    Args:
+        request: request (BenchmarkRunRequest) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     cloud_provider = require_non_empty_string(request.cloud_provider, "cloud_provider")
     if cloud_provider != "gcp":
         raise ToolContractError("cloud_provider must be gcp for P9.1")
@@ -221,6 +245,18 @@ def validate_benchmark_run_request(request: BenchmarkRunRequest) -> None:
 
 
 def validate_history_query(query: HistoricalMetricsQuery) -> None:
+    """Validate history query.
+
+
+    Args:
+        query: query (HistoricalMetricsQuery) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     clean_optional_string(query.machine_type, "machine_type")
     clean_optional_string(query.processor_family, "processor_family")
     clean_optional_string(query.architecture, "architecture")
@@ -233,6 +269,19 @@ def validate_history_query(query: HistoricalMetricsQuery) -> None:
 
 
 def require_non_empty_string(value: str, field_name: str) -> str:
+    """Compute require non empty string.
+
+
+    Args:
+        value: value (str) used by this operation.
+        field_name: field name (str) used by this operation.
+
+    Returns:
+        str value produced by require non empty string.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     cleaned = value.strip() if isinstance(value, str) else ""
     if not cleaned:
         raise ToolContractError(f"{field_name} must be a non-empty string")
@@ -240,6 +289,19 @@ def require_non_empty_string(value: str, field_name: str) -> str:
 
 
 def require_positive_int(value: int, field_name: str) -> int:
+    """Compute require positive integer.
+
+
+    Args:
+        value: value (int) used by this operation.
+        field_name: field name (str) used by this operation.
+
+    Returns:
+        int value produced by require positive integer.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not isinstance(value, int) or isinstance(value, bool):
         raise ToolContractError(f"{field_name} must be a positive integer")
     if value < 1:
@@ -248,6 +310,19 @@ def require_positive_int(value: int, field_name: str) -> int:
 
 
 def require_duration(value: str, field_name: str) -> str:
+    """Compute require duration.
+
+
+    Args:
+        value: value (str) used by this operation.
+        field_name: field name (str) used by this operation.
+
+    Returns:
+        str value produced by require duration.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     cleaned = require_non_empty_string(value, field_name)
     if cleaned[-1] in {"s", "m", "h"}:
         number = cleaned[:-1]
@@ -259,6 +334,19 @@ def require_duration(value: str, field_name: str) -> str:
 
 
 def clean_optional_string(value: str | None, field_name: str) -> str | None:
+    """Compute clean optional string.
+
+
+    Args:
+        value: value (str | None) used by this operation.
+        field_name: field name (str) used by this operation.
+
+    Returns:
+        str | None value produced by clean optional string.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if value is None:
         return None
     cleaned = value.strip()

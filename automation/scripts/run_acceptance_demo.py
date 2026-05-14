@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run and verify the SiliconBoutique end-to-end acceptance demo."""
+"""Command-line workflow for run acceptance demo in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -54,6 +58,28 @@ class AcceptanceDemoError(RuntimeError):
 
 @dataclass
 class AcceptanceConfig:
+    """Container for acceptance Config state and behavior.
+
+
+    Attributes:
+        mode: mode (str) stored on the object.
+        run_id: run ID (str) stored on the object.
+        artifacts_dir: artifacts dir (Path) stored on the object.
+        test_duration: test duration (str) stored on the object.
+        min_duration_seconds: min duration seconds (int) stored on the object.
+        concurrent_users: concurrent users (str) stored on the object.
+        users_per_second: users per second (str) stored on the object.
+        prometheus_port: Prometheus port (int) stored on the object.
+        dashboard_hold_seconds: dashboard hold seconds (int) stored on the object.
+        grafana_port: Grafana port (int) stored on the object.
+        bigquery_project_id: BigQuery project ID (str) stored on the object.
+        bigquery_dataset: BigQuery dataset (str) stored on the object.
+        bigquery_table: BigQuery table (str) stored on the object.
+        bigquery_location: BigQuery location (str) stored on the object.
+        require_bigquery: require BigQuery (bool) stored on the object.
+        cloud_provider: cloud provider (str) stored on the object.
+        namespace: namespace (str) stored on the object.
+    """
     mode: str
     run_id: str
     artifacts_dir: Path
@@ -74,10 +100,18 @@ class AcceptanceConfig:
 
     @property
     def report_path(self) -> Path:
+        """Compute report path.
+
+
+        Returns:
+            Path value produced by report path.
+        """
         return self.artifacts_dir / REPORT_NAME
 
 
 class AcceptanceDemo:
+    """Container for acceptance Demo state and behavior.
+    """
     def __init__(
         self,
         config: AcceptanceConfig,
@@ -86,6 +120,18 @@ class AcceptanceDemo:
         sleep=time.sleep,
         popen=subprocess.Popen,
     ) -> None:
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            config: config (AcceptanceConfig) used by this operation.
+            runner: runner (run_local_benchmark.CommandRunner | None) used by this operation.
+            sleep: sleep used by this operation.
+            popen: popen used by this operation.
+
+        Returns:
+            None.
+        """
         self.config = config
         self.runner = runner or run_local_benchmark.CommandRunner()
         self.sleep = sleep
@@ -95,12 +141,24 @@ class AcceptanceDemo:
         self.primary_error: Exception | None = None
 
     def run(self) -> int:
+        """Run the configured operation.
+
+
+        Returns:
+            int value produced by run.
+        """
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         if self.config.mode == "local":
             return self.run_local()
         return self.verify_existing()
 
     def run_local(self) -> int:
+        """Run local.
+
+
+        Returns:
+            int value produced by run local.
+        """
         benchmark = run_local_benchmark.LocalBenchmark(
             self.local_benchmark_config(),
             runner=self.runner,
@@ -108,6 +166,15 @@ class AcceptanceDemo:
             popen=self.popen,
         )
         def capture_evidence(completed_benchmark: run_local_benchmark.LocalBenchmark) -> None:
+            """Capture evidence.
+
+
+            Args:
+                completed_benchmark: completed benchmark (run_local_benchmark.LocalBenchmark) used by this operation.
+
+            Returns:
+                None.
+            """
             self.dashboard_evidence = self.capture_dashboard_evidence(
                 namespace=completed_benchmark.config.namespace,
                 kube_context=completed_benchmark.config.kube_context,
@@ -135,6 +202,12 @@ class AcceptanceDemo:
         return 0 if status == "passed" else 2
 
     def verify_existing(self) -> int:
+        """Compute verify existing.
+
+
+        Returns:
+            int value produced by verify existing.
+        """
         try:
             run_id = self.expected_run_id()
             namespace = self.namespace_from_trace(fallback=self.config.namespace)
@@ -158,6 +231,12 @@ class AcceptanceDemo:
         return 0 if status == "passed" else 2
 
     def local_benchmark_config(self) -> run_local_benchmark.BenchmarkConfig:
+        """Compute local benchmark config.
+
+
+        Returns:
+            run_local_benchmark.BenchmarkConfig value produced by local benchmark config.
+        """
         args = run_local_benchmark.parse_args(
             [
                 "--run-id",
@@ -181,6 +260,20 @@ class AcceptanceDemo:
     def capture_dashboard_evidence(
         self, *, namespace: str, kube_context: str, run_id: str
     ) -> dict[str, Any]:
+        """Capture dashboard evidence.
+
+
+        Args:
+            namespace: namespace (str) used by this operation.
+            kube_context: kube context (str) used by this operation.
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by capture dashboard evidence.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         command = [
             "kubectl",
             "get",
@@ -280,6 +373,16 @@ class AcceptanceDemo:
     def grafana_dashboard_load_evidence(
         self, *, namespace: str, kube_context: str
     ) -> dict[str, Any]:
+        """Compute Grafana dashboard load evidence.
+
+
+        Args:
+            namespace: namespace (str) used by this operation.
+            kube_context: kube context (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by Grafana dashboard load evidence.
+        """
         try:
             password = self.grafana_admin_password(namespace=namespace, kube_context=kube_context)
             with self.port_forward_grafana(namespace=namespace, kube_context=kube_context):
@@ -326,6 +429,19 @@ class AcceptanceDemo:
         }
 
     def grafana_admin_password(self, *, namespace: str, kube_context: str) -> str:
+        """Compute Grafana admin password.
+
+
+        Args:
+            namespace: namespace (str) used by this operation.
+            kube_context: kube context (str) used by this operation.
+
+        Returns:
+            str value produced by Grafana admin password.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         command = [
             "kubectl",
             "get",
@@ -355,6 +471,18 @@ class AcceptanceDemo:
         return password
 
     def prometheus_metrics_evidence(self, run_id: str) -> dict[str, Any]:
+        """Compute Prometheus metrics evidence.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by Prometheus metrics evidence.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         metrics_path = self.config.artifacts_dir / "prometheus-metrics.json"
         if not metrics_path.exists():
             raise AcceptanceDemoError("missing Prometheus metrics artifact")
@@ -381,6 +509,18 @@ class AcceptanceDemo:
         }
 
     def maybe_load_bigquery(self, run_id: str) -> dict[str, Any]:
+        """Optionally run load bigquery.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by maybe load bigquery.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         provided = all(
             (
                 self.config.bigquery_project_id,
@@ -426,6 +566,18 @@ class AcceptanceDemo:
         return self.verify_bigquery_report(run_id)
 
     def verify_bigquery_report(self, run_id: str) -> dict[str, Any]:
+        """Compute verify BigQuery report.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by verify BigQuery report.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         report_path = self.config.artifacts_dir / "bigquery-load-report.json"
         if not report_path.exists():
             if self.config.require_bigquery:
@@ -450,6 +602,16 @@ class AcceptanceDemo:
         }
 
     def hold_dashboard_if_requested(self, *, namespace: str, kube_context: str) -> None:
+        """Compute hold dashboard if requested.
+
+
+        Args:
+            namespace: namespace (str) used by this operation.
+            kube_context: kube context (str) used by this operation.
+
+        Returns:
+            None.
+        """
         if self.config.dashboard_hold_seconds <= 0:
             self.dashboard_evidence["live_inspection"] = {
                 "status": "skipped_optional",
@@ -468,6 +630,16 @@ class AcceptanceDemo:
 
     @contextmanager
     def port_forward_grafana(self, *, namespace: str, kube_context: str):
+        """Compute port forward Grafana.
+
+
+        Args:
+            namespace: namespace (str) used by this operation.
+            kube_context: kube context (str) used by this operation.
+
+        Returns:
+            None.
+        """
         command = [
             "kubectl",
             "port-forward",
@@ -499,6 +671,17 @@ class AcceptanceDemo:
     def write_acceptance_report(
         self, *, run_id: str, namespace: str, cloud_provider: str
     ) -> str:
+        """Write acceptance report.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+            namespace: namespace (str) used by this operation.
+            cloud_provider: cloud provider (str) used by this operation.
+
+        Returns:
+            str value produced by write acceptance report.
+        """
         checks = {
             "trace": self.trace_check(run_id),
             "summary": self.summary_check(run_id),
@@ -542,12 +725,30 @@ class AcceptanceDemo:
         return status
 
     def verify_bigquery_report_best_effort(self, run_id: str) -> dict[str, Any]:
+        """Compute verify BigQuery report best effort.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by verify BigQuery report best effort.
+        """
         try:
             return self.verify_bigquery_report(run_id)
         except AcceptanceDemoError as exc:
             return {"status": "failed", "error": str(exc)}
 
     def trace_check(self, run_id: str) -> dict[str, Any]:
+        """Compute trace check.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by trace check.
+        """
         trace_path = self.config.artifacts_dir / "workflow-trace.json"
         if not trace_path.exists():
             return {"status": "failed", "error": "missing workflow trace", "path": str(trace_path)}
@@ -563,6 +764,15 @@ class AcceptanceDemo:
         }
 
     def summary_check(self, run_id: str) -> dict[str, Any]:
+        """Compute summary check.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by summary check.
+        """
         path = self.config.artifacts_dir / "benchmark-summary.json"
         if not path.exists():
             return {"status": "failed", "error": "missing benchmark summary", "path": str(path)}
@@ -580,6 +790,15 @@ class AcceptanceDemo:
         }
 
     def summary_store_check(self, run_id: str) -> dict[str, Any]:
+        """Compute summary store check.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by summary store check.
+        """
         path = self.config.artifacts_dir / "benchmark-summaries.ndjson"
         if not path.exists():
             return {"status": "failed", "error": "missing summary store", "path": str(path)}
@@ -593,6 +812,15 @@ class AcceptanceDemo:
         }
 
     def comparability_check(self, run_id: str) -> dict[str, Any]:
+        """Compute comparability check.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            dict[str, Any] value produced by comparability check.
+        """
         path = self.config.artifacts_dir / "comparability-report.json"
         if not path.exists():
             return {"status": "failed", "error": "missing comparability report", "path": str(path)}
@@ -608,6 +836,15 @@ class AcceptanceDemo:
         }
 
     def expected_run_id(self, *, fallback: str = "") -> str:
+        """Compute expected run ID.
+
+
+        Args:
+            fallback: fallback (str) used by this operation.
+
+        Returns:
+            str value produced by expected run ID.
+        """
         if self.config.run_id:
             return self.config.run_id
         trace_path = self.config.artifacts_dir / "workflow-trace.json"
@@ -616,6 +853,15 @@ class AcceptanceDemo:
         return fallback
 
     def namespace_from_trace(self, *, fallback: str = "") -> str:
+        """Compute namespace from trace.
+
+
+        Args:
+            fallback: fallback (str) used by this operation.
+
+        Returns:
+            str value produced by namespace from trace.
+        """
         trace_path = self.config.artifacts_dir / "workflow-trace.json"
         if trace_path.exists():
             return str(read_json(trace_path).get("benchmark", {}).get("namespace", fallback))
@@ -623,6 +869,18 @@ class AcceptanceDemo:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Run or verify the SiliconBoutique end-to-end acceptance demo."
     )
@@ -649,6 +907,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        parser: parser (argparse.ArgumentParser) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if args.min_duration_seconds < 1:
         parser.error("--min-duration-seconds must be at least 1")
     if args.dashboard_hold_seconds < 0:
@@ -662,6 +933,15 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 def config_from_args(args: argparse.Namespace) -> AcceptanceConfig:
+    """Compute config from arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        AcceptanceConfig value produced by config from arguments.
+    """
     return AcceptanceConfig(
         mode=args.mode,
         run_id=args.run_id,
@@ -684,6 +964,15 @@ def config_from_args(args: argparse.Namespace) -> AcceptanceConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     demo = AcceptanceDemo(config_from_args(args))
     return demo.run()

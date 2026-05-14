@@ -1,3 +1,5 @@
+"""Tests for test generate comparison report."""
+
 import importlib.util
 import io
 import json
@@ -20,16 +22,38 @@ spec.loader.exec_module(reporter)
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(self, rows):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            rows: rows used by this operation.
+
+        Returns:
+            None.
+        """
         self.rows = rows
         self.commands = []
 
     def __call__(self, command):
+        """Handle the object call using the supplied arguments.
+
+
+        Args:
+            command: command used by this operation.
+
+        Returns:
+            Result produced by call.
+        """
         self.commands.append(command)
         return reporter.CommandResult(0, json.dumps(self.rows), "")
 
 
 class GenerateComparisonReportTest(unittest.TestCase):
+    """Unit tests covering generate Comparison Report behavior.
+    """
     def valid_summary(
         self,
         run_id,
@@ -43,12 +67,35 @@ class GenerateComparisonReportTest(unittest.TestCase):
         memory_gb=1.0,
         cost=0.4,
         failures=1,
-        request_total=1000,
+        request_total=120000,
         benchmark_start="2026-05-07T12:00:00Z",
         cloud_provider="gcp",
         region="us-central1",
         zone="us-central1-a",
     ):
+        """Compute valid summary.
+
+
+        Args:
+            run_id: run ID used by this operation.
+            machine_type: machine type used by this operation.
+            processor_family: processor family used by this operation.
+            architecture: architecture used by this operation.
+            avg_rps: avg rps used by this operation.
+            cpu_cores: CPU cores used by this operation.
+            p99: p99 used by this operation.
+            memory_gb: memory GB used by this operation.
+            cost: cost used by this operation.
+            failures: failures used by this operation.
+            request_total: request total used by this operation.
+            benchmark_start: benchmark start used by this operation.
+            cloud_provider: cloud provider used by this operation.
+            region: region used by this operation.
+            zone: zone used by this operation.
+
+        Returns:
+            Result produced by valid summary.
+        """
         return {
             "architecture": architecture,
             "avg_cpu_throttling_ratio": 0.01,
@@ -101,12 +148,32 @@ class GenerateComparisonReportTest(unittest.TestCase):
         }
 
     def write_store(self, path, rows):
+        """Write store.
+
+
+        Args:
+            path: path used by this operation.
+            rows: rows used by this operation.
+
+        Returns:
+            None.
+        """
         path.write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
         )
 
     def run_report(self, rows, *extra_args):
+        """Run report.
+
+
+        Args:
+            rows: rows used by this operation.
+            extra_args: extra arguments used by this operation.
+
+        Returns:
+            Result produced by run report.
+        """
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
         base = Path(tmpdir.name)
@@ -132,6 +199,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
         return exit_code, payload, markdown.read_text(encoding="utf-8")
 
     def test_ranks_and_aggregates_comparable_machine_groups(self):
+        """Verify ranks and aggregates comparable machine groups.
+
+
+        Returns:
+            None.
+        """
         rows = [
             self.valid_summary("c3-a", avg_rps=100, cpu_cores=2, p99=120, memory_gb=1.0, cost=0.4, failures=1),
             self.valid_summary("c3-b", avg_rps=120, cpu_cores=2, p99=100, memory_gb=1.2, cost=0.5, failures=2),
@@ -174,6 +247,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
         self.assertIn("| 1 | gcp | us-central1 | c3-standard-4 | c3 |", markdown)
 
     def test_mixed_cloud_rows_render_provider_and_region(self):
+        """Verify mixed cloud rows render provider and region.
+
+
+        Returns:
+            None.
+        """
         rows = [
             self.valid_summary("gcp-a"),
             self.valid_summary(
@@ -202,6 +281,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
         self.assertIn("| aws | us-east-1 | m7i.xlarge | m7i |", markdown)
 
     def test_rejects_non_comparable_runs(self):
+        """Verify rejects non comparable runs.
+
+
+        Returns:
+            None.
+        """
         partial = self.valid_summary("partial")
         partial["summary_status"] = "partial"
 
@@ -215,6 +300,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
         self.assertIn("summary_status_not_complete", payload["rejected_runs"][0]["reasons"])
 
     def test_missing_cost_fields_warns_and_excludes_cost_ranking(self):
+        """Verify missing cost fields warns and excludes cost ranking.
+
+
+        Returns:
+            None.
+        """
         row_a = self.valid_summary("run-a")
         row_b = self.valid_summary("run-b", machine_type="t2a-standard-4", processor_family="t2a")
         row_a["cost_per_1m_requests_usd"] = None
@@ -232,7 +323,35 @@ class GenerateComparisonReportTest(unittest.TestCase):
             "t2a-standard-4",
         )
 
+    def test_suspect_request_volume_is_rejected_from_rankings(self):
+        """Verify suspect request totals are excluded from comparison rankings."""
+        suspect = self.valid_summary("suspect", request_total=51, avg_rps=2.6)
+        valid = self.valid_summary(
+            "valid",
+            machine_type="t2a-standard-4",
+            processor_family="t2a",
+            avg_rps=80,
+            request_total=96000,
+        )
+
+        exit_code, payload, _ = self.run_report([suspect, valid])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "warn")
+        self.assertEqual(payload["suspect_run_ids"], ["suspect"])
+        self.assertIn(
+            "request_total_far_below_avg_rps_window",
+            payload["rejected_runs"][0]["reasons"],
+        )
+        self.assertEqual(payload["comparable_run_count"], 1)
+
     def test_bigquery_source_builds_filtered_query_and_parses_rows(self):
+        """Verify BigQuery source builds filtered query and parses rows.
+
+
+        Returns:
+            None.
+        """
         run_a = self.valid_summary("run-a")
         run_b = self.valid_summary(
             "run-b", machine_type="t2a-standard-4", processor_family="t2a"
@@ -298,6 +417,12 @@ class GenerateComparisonReportTest(unittest.TestCase):
             self.assertIn("LIMIT 5", query)
 
     def test_bigquery_json_object_parse_error_is_reported(self):
+        """Verify BigQuery JSON object parse error is reported.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary("run-a")
         row["invalid_metric_samples"] = "not-json"
         runner = FakeRunner([row])

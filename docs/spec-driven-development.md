@@ -62,4 +62,4 @@ The system is organized into five decoupled components with structured artifacts
 
 ## Roadmap
 
-[`docs/roadmap.md`](roadmap.md) remains the implementation history and dependency record. Current operating instructions live in [`docs/local-usage.md`](local-usage.md) and [`docs/runbook.md`](runbook.md).
+[`docs/roadmap.md`](roadmap.md) remains the implementation history and dependency record. Current operating instructions live in [`docs/runbook.md`](runbook.md).

@@ -1,3 +1,5 @@
+"""Tests for test aws eks scaffold."""
+
 import json
 import unittest
 from pathlib import Path
@@ -9,11 +11,28 @@ PRICING = REPO_ROOT / "automation" / "templates" / "machine-pricing.json"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-aws.yml"
 
 
-class AwsEksScaffoldTest(unittest.TestCase):
+class AwsEksPathTest(unittest.TestCase):
+    """Unit tests covering AWS EKS Path behavior.
+    """
     def read(self, name):
+        """Compute read.
+
+
+        Args:
+            name: name used by this operation.
+
+        Returns:
+            Result produced by read.
+        """
         return (AWS_ROOT / name).read_text(encoding="utf-8")
 
     def test_terraform_root_exposes_required_metadata_contract(self):
+        """Verify terraform root exposes required metadata contract.
+
+
+        Returns:
+            None.
+        """
         variables = self.read("variables.tf")
         outputs = self.read("outputs.tf")
         required_variables = (
@@ -57,6 +76,12 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn('value       = "aws"', outputs)
 
     def test_provider_is_static_validation_friendly(self):
+        """Verify provider is static validation friendly.
+
+
+        Returns:
+            None.
+        """
         providers = self.read("providers.tf")
 
         self.assertIn("static-validation-access-key", providers)
@@ -64,7 +89,13 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn("skip_metadata_api_check     = var.static_validation_mode", providers)
         self.assertIn("skip_requesting_account_id  = var.static_validation_mode", providers)
 
-    def test_scaffold_uses_run_scoped_aws_resources(self):
+    def test_eks_path_uses_run_scoped_aws_resources(self):
+        """Verify eKS path uses run scoped AWS resources.
+
+
+        Returns:
+            None.
+        """
         main = self.read("main.tf")
 
         for resource_type in (
@@ -79,6 +110,12 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertNotIn('data "aws_availability_zones"', main)
 
     def test_aws_pricing_fixture_entries_exist(self):
+        """Verify AWS pricing fixture entries exist.
+
+
+        Returns:
+            None.
+        """
         prices = json.loads(PRICING.read_text(encoding="utf-8"))["prices"]
         keys = {
             (entry["cloud_provider"], entry["region"], entry["machine_type"], entry["pricing_model"])
@@ -91,6 +128,12 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn(("aws", "us-east-1", "c7g.xlarge", "on_demand"), keys)
 
     def test_aws_workflow_promotes_live_benchmark_path(self):
+        """Verify AWS workflow promotes live benchmark path.
+
+
+        Returns:
+            None.
+        """
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("Benchmark AWS", workflow)
@@ -105,6 +148,9 @@ class AwsEksScaffoldTest(unittest.TestCase):
         self.assertIn("helm upgrade --install \"$MONITORING_RELEASE\"", workflow)
         self.assertIn("--cloud-provider aws", workflow)
         self.assertIn("--min-coverage-ratio 0.95", workflow)
+        self.assertIn('--duration-seconds "$TEST_DURATION_SECONDS"', workflow)
+        self.assertIn('--log-source "$log_source"', workflow)
+        self.assertIn("--previous", workflow)
         self.assertIn("load_benchmark_summary_to_bigquery.py", workflow)
         self.assertIn("run_acceptance_demo.py", workflow)
         self.assertIn("terraform destroy -auto-approve", workflow)

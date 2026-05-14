@@ -1,3 +1,5 @@
+"""Tests for test mcp app."""
+
 import asyncio
 import json
 import os
@@ -33,7 +35,15 @@ from silicon_boutique_mcp.tools import tool_definitions_as_dicts  # noqa: E402
 
 @unittest.skipUnless(MCP_AVAILABLE, "mcp SDK is not installed")
 class McpAppTest(unittest.TestCase):
+    """Unit tests covering mCP App behavior.
+    """
     def test_registered_tool_names_match_contract_registry(self):
+        """Verify registered tool names match contract registry.
+
+
+        Returns:
+            None.
+        """
         app = build_mcp_app(
             run_controller=FakeRunController(),
             history_store=FakeHistoryStore(),
@@ -45,7 +55,19 @@ class McpAppTest(unittest.TestCase):
         )
 
     def test_list_tools_preserves_contract_names_and_descriptions(self):
+        """Verify list tools preserves contract names and descriptions.
+
+
+        Returns:
+            None.
+        """
         async def scenario():
+            """Compute scenario.
+
+
+            Returns:
+                None.
+            """
             app = build_mcp_app(
                 run_controller=FakeRunController(),
                 history_store=FakeHistoryStore(),
@@ -61,7 +83,19 @@ class McpAppTest(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_call_tools_return_contract_shaped_json(self):
+        """Verify call tools return contract shaped JSON.
+
+
+        Returns:
+            None.
+        """
         async def scenario():
+            """Compute scenario.
+
+
+            Returns:
+                None.
+            """
             app = build_mcp_app(
                 run_controller=FakeRunController(),
                 history_store=FakeHistoryStore(),
@@ -99,7 +133,19 @@ class McpAppTest(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_invalid_tool_input_returns_tool_error(self):
+        """Verify invalid tool input returns tool error.
+
+
+        Returns:
+            None.
+        """
         async def scenario():
+            """Compute scenario.
+
+
+            Returns:
+                None.
+            """
             app = build_mcp_app(
                 run_controller=FakeRunController(),
                 history_store=FakeHistoryStore(),
@@ -126,7 +172,19 @@ class McpAppTest(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_fixture_mode_rejects_trigger_but_serves_status_and_history(self):
+        """Verify fixture mode rejects trigger but serves status and history.
+
+
+        Returns:
+            None.
+        """
         async def scenario():
+            """Compute scenario.
+
+
+            Returns:
+                None.
+            """
             with tempfile.TemporaryDirectory() as tmpdir:
                 trace_fixture = Path(tmpdir) / "trace.json"
                 summary_store = Path(tmpdir) / "summaries.ndjson"
@@ -173,7 +231,19 @@ class McpAppTest(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_stdio_process_lists_and_calls_fixture_tools(self):
+        """Verify stdio process lists and calls fixture tools.
+
+
+        Returns:
+            None.
+        """
         async def scenario():
+            """Compute scenario.
+
+
+            Returns:
+                None.
+            """
             with tempfile.TemporaryDirectory() as tmpdir:
                 trace_fixture = Path(tmpdir) / "trace.json"
                 summary_store = Path(tmpdir) / "summaries.ndjson"
@@ -225,7 +295,18 @@ class McpAppTest(unittest.TestCase):
 
 
 class FakeRunController:
+    """Test double that records run Controller interactions.
+    """
     def trigger_benchmark_run(self, request):
+        """Trigger benchmark run.
+
+
+        Args:
+            request: request used by this operation.
+
+        Returns:
+            Result produced by trigger benchmark run.
+        """
         return RunIdentity(
             run_id="gha-123-1",
             external_run_id="123",
@@ -233,6 +314,15 @@ class FakeRunController:
         )
 
     def get_benchmark_status(self, run_id):
+        """Return benchmark status.
+
+
+        Args:
+            run_id: run ID used by this operation.
+
+        Returns:
+            Result produced by get benchmark status.
+        """
         return WorkflowTrace(
             identity=RunIdentity(run_id=run_id),
             status=BenchmarkRunStatus.RUNNING,
@@ -247,6 +337,8 @@ class FakeRunController:
 
 
 class FakeHistoryStore:
+    """Test double that records history Store interactions.
+    """
     def query_historical_metrics(
         self,
         *,
@@ -255,10 +347,31 @@ class FakeHistoryStore:
         architecture=None,
         limit=10,
     ):
+        """Query historical metrics.
+
+
+        Args:
+            machine_type: machine type used by this operation.
+            processor_family: processor family used by this operation.
+            architecture: architecture used by this operation.
+            limit: limit used by this operation.
+
+        Returns:
+            Result produced by query historical metrics.
+        """
         return [BenchmarkSummaryReference(**summary_row("run-a"))][:limit]
 
 
 def json_payload(blocks):
+    """Compute jSON payload.
+
+
+    Args:
+        blocks: blocks used by this operation.
+
+    Returns:
+        Result produced by jSON payload.
+    """
     if isinstance(blocks, tuple):
         if len(blocks) > 1 and isinstance(blocks[1], dict):
             return blocks[1]
@@ -267,10 +380,28 @@ def json_payload(blocks):
 
 
 def call_result_payload(result):
+    """Compute call result payload.
+
+
+    Args:
+        result: result used by this operation.
+
+    Returns:
+        Result produced by call result payload.
+    """
     return json.loads(result.content[0].text)
 
 
 def summary_row(run_id):
+    """Compute summary row.
+
+
+    Args:
+        run_id: run ID used by this operation.
+
+    Returns:
+        Result produced by summary row.
+    """
     return {
         "run_id": run_id,
         "machine_type": "c3-standard-4",

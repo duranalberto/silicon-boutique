@@ -1,3 +1,5 @@
+"""Tests for test BigQuery history."""
+
 import json
 import os
 import unittest
@@ -17,13 +19,21 @@ from silicon_boutique_mcp.bigquery_history import (  # noqa: E402
     BigQueryHistoryStore,
     CommandResult,
     build_history_query,
-    sql_string,
     summary_references_from_json,
 )
+from silicon_boutique_shared import bigquery as BigQuery
 
 
 class BigQueryHistoryTest(unittest.TestCase):
+    """Unit tests covering big Query History behavior.
+    """
     def config(self):
+        """Compute config.
+
+
+        Returns:
+            Result produced by config.
+        """
         return BigQueryHistoryConfig(
             project_id="example-project",
             dataset_id="silicon_boutique",
@@ -32,6 +42,15 @@ class BigQueryHistoryTest(unittest.TestCase):
         )
 
     def row(self, **overrides):
+        """Compute row.
+
+
+        Args:
+            overrides: overrides used by this operation.
+
+        Returns:
+            Result produced by row.
+        """
         values = {
             "run_id": "run-a",
             "machine_type": "c3-standard-4",
@@ -56,6 +75,12 @@ class BigQueryHistoryTest(unittest.TestCase):
         return values
 
     def test_config_from_env_uses_defaults(self):
+        """Verify config from environment uses defaults.
+
+
+        Returns:
+            None.
+        """
         config = BigQueryHistoryConfig.from_env(
             {
                 "GOOGLE_CLOUD_PROJECT": "example-project",
@@ -70,10 +95,22 @@ class BigQueryHistoryTest(unittest.TestCase):
         self.assertEqual(config.bq_command, "/tmp/fake-bq")
 
     def test_config_from_env_requires_project(self):
+        """Verify config from environment requires project.
+
+
+        Returns:
+            None.
+        """
         with self.assertRaises(BigQueryHistoryError):
             BigQueryHistoryConfig.from_env({})
 
     def test_invalid_destination_config_is_rejected(self):
+        """Verify invalid destination config is rejected.
+
+
+        Returns:
+            None.
+        """
         invalid_configs = [
             BigQueryHistoryConfig(project_id="Example_Project"),
             BigQueryHistoryConfig(project_id="example-project", dataset_id="bad-name"),
@@ -86,9 +123,21 @@ class BigQueryHistoryTest(unittest.TestCase):
                     BigQueryHistoryStore(config, FakeRunner([]))
 
     def test_sql_string_escapes_quotes_and_backslashes(self):
-        self.assertEqual(sql_string("c3'\\x"), "'c3\\'\\\\x'")
+        """Verify sQL string escapes quotes and backslashes.
+
+
+        Returns:
+            None.
+        """
+        self.assertEqual(BigQuery.sql_string("c3'\\x"), "'c3\\'\\\\x'")
 
     def test_build_history_query_selects_expected_fields_and_filters(self):
+        """Verify build history query selects expected fields and filters.
+
+
+        Returns:
+            None.
+        """
         query = build_history_query(
             config=self.config(),
             filters={
@@ -112,6 +161,12 @@ class BigQueryHistoryTest(unittest.TestCase):
         self.assertNotIn("SELECT *", query)
 
     def test_query_historical_metrics_runs_bq_and_maps_rows(self):
+        """Verify query historical metrics runs BigQuery and maps rows.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner([self.row(), self.row(run_id="run-b", cost_per_1m_requests_usd=None)])
         store = BigQueryHistoryStore(self.config(), runner)
 
@@ -133,11 +188,23 @@ class BigQueryHistoryTest(unittest.TestCase):
         self.assertEqual(command[4:8], ["--location", "US", "query", "--nouse_legacy_sql"])
 
     def test_query_historical_metrics_returns_empty_results(self):
+        """Verify query historical metrics returns empty results.
+
+
+        Returns:
+            None.
+        """
         store = BigQueryHistoryStore(self.config(), FakeRunner([]))
 
         self.assertEqual(store.query_historical_metrics(), [])
 
     def test_summary_mapping_skips_non_object_rows(self):
+        """Verify summary mapping skips non object rows.
+
+
+        Returns:
+            None.
+        """
         results = summary_references_from_json(
             json.dumps([self.row(run_id="run-a"), "skip-me", self.row(run_id="run-b")])
         )
@@ -145,6 +212,12 @@ class BigQueryHistoryTest(unittest.TestCase):
         self.assertEqual([result.run_id for result in results], ["run-a", "run-b"])
 
     def test_command_failure_and_invalid_json_are_reported_without_secrets(self):
+        """Verify command failure and invalid JSON are reported without secrets.
+
+
+        Returns:
+            None.
+        """
         store = BigQueryHistoryStore(
             self.config(),
             FakeRunner([], returncode=1, stderr="permission denied"),
@@ -163,6 +236,12 @@ class BigQueryHistoryTest(unittest.TestCase):
         "guarded BigQuery integration test is disabled by default",
     )
     def test_guarded_integration_queries_bigquery_history(self):
+        """Verify guarded integration queries BigQuery history.
+
+
+        Returns:
+            None.
+        """
         store = BigQueryHistoryStore.from_env()
 
         rows = store.query_historical_metrics(limit=1)
@@ -172,13 +251,35 @@ class BigQueryHistoryTest(unittest.TestCase):
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(self, rows, *, returncode=0, stderr=""):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            rows: rows used by this operation.
+            returncode: returncode used by this operation.
+            stderr: standard error used by this operation.
+
+        Returns:
+            None.
+        """
         self.rows = rows
         self.returncode = returncode
         self.stderr = stderr
         self.commands = []
 
     def __call__(self, command):
+        """Handle the object call using the supplied arguments.
+
+
+        Args:
+            command: command used by this operation.
+
+        Returns:
+            Result produced by call.
+        """
         self.commands.append(command)
         return CommandResult(
             returncode=self.returncode,

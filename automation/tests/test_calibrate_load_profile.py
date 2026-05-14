@@ -1,3 +1,5 @@
+"""Tests for test calibrate load profile."""
+
 import json
 import importlib.util
 import subprocess
@@ -17,7 +19,18 @@ spec.loader.exec_module(calibrate_load_profile)
 
 
 class CalibrateLoadProfileTest(unittest.TestCase):
+    """Unit tests covering calibrate Load Profile behavior.
+    """
     def run_calibration(self, trials):
+        """Run calibration.
+
+
+        Args:
+            trials: trials used by this operation.
+
+        Returns:
+            Result produced by run calibration.
+        """
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
         base = Path(tmpdir.name)
@@ -46,6 +59,12 @@ class CalibrateLoadProfileTest(unittest.TestCase):
         return result, json.loads(output.read_text(encoding="utf-8"))
 
     def test_increases_load_then_accepts_target_band(self):
+        """Verify increases load then accepts target band.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_calibration(
             [
                 {"avg_cpu_utilization_pct": 60.0},
@@ -60,6 +79,12 @@ class CalibrateLoadProfileTest(unittest.TestCase):
         self.assertAlmostEqual(report["selected_profile"]["load_users_per_second"], 1.5)
 
     def test_decreases_load_when_above_target_band(self):
+        """Verify decreases load when above target band.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_calibration(
             [
                 {"avg_cpu_utilization_pct": 96.0},
@@ -72,6 +97,12 @@ class CalibrateLoadProfileTest(unittest.TestCase):
         self.assertEqual(report["selected_profile"]["load_concurrent_users"], 8)
 
     def test_rejects_trial_with_excessive_failures(self):
+        """Verify rejects trial with excessive failures.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_calibration(
             [
                 {"avg_cpu_utilization_pct": 85.0, "request_failure_ratio": 0.2},
@@ -85,6 +116,12 @@ class CalibrateLoadProfileTest(unittest.TestCase):
         self.assertIn("source_run_id", report["selected_profile"])
 
     def test_local_execution_mode_is_accepted_by_parser(self):
+        """Verify local execution mode is accepted by parser.
+
+
+        Returns:
+            None.
+        """
         args = calibrate_load_profile.parse_args(
             [
                 "--execute-local",
@@ -98,6 +135,12 @@ class CalibrateLoadProfileTest(unittest.TestCase):
         self.assertTrue(args.execute_local)
 
     def test_gcp_workflow_command_uses_trial_load_settings(self):
+        """Verify GCP workflow command uses trial load settings.
+
+
+        Returns:
+            None.
+        """
         args = calibrate_load_profile.parse_args(
             [
                 "--execute-gcp",

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Write workflow-shaped benchmark trace artifacts from environment variables."""
+"""Command-line workflow for write workflow trace in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,18 @@ from silicon_boutique_shared.automation import write_json
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(description="Write SiliconBoutique workflow trace JSON.")
     parser.add_argument("--artifacts-dir", type=Path, default=Path("artifacts"))
     parser.add_argument("--output", type=Path)
@@ -26,6 +42,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     trace_path = args.output or args.artifacts_dir / "workflow-trace.json"
     write_json(trace_path, build_trace(args.artifacts_dir, trace_path, os.environ))
@@ -33,6 +58,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_trace(artifacts_dir: Path, trace_path: Path, env: dict[str, str]) -> dict[str, Any]:
+    """Build trace.
+
+
+    Args:
+        artifacts_dir: artifacts dir (Path) used by this operation.
+        trace_path: trace path (Path) used by this operation.
+        env: environment (dict[str, str]) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build trace.
+    """
     summary_path = artifacts_dir / "benchmark-summary.json"
     summary_store_path = artifacts_dir / "benchmark-summaries.ndjson"
     loadgenerator_stats_path = artifacts_dir / "loadgenerator-stats.json"
@@ -48,7 +84,7 @@ def build_trace(artifacts_dir: Path, trace_path: Path, env: dict[str, str]) -> d
     )
 
     return {
-        "github": {
+        "GitHub": {
             "workflow": env.get("GITHUB_WORKFLOW", ""),
             "run_id": env.get("GITHUB_RUN_ID", ""),
             "run_attempt": env.get("GITHUB_RUN_ATTEMPT", ""),
@@ -113,6 +149,16 @@ def build_trace(artifacts_dir: Path, trace_path: Path, env: dict[str, str]) -> d
 
 
 def first_env(env: dict[str, str], *names: str) -> str:
+    """Compute first environment.
+
+
+    Args:
+        env: environment (dict[str, str]) used by this operation.
+        names: names (str) used by this operation.
+
+    Returns:
+        str value produced by first environment.
+    """
     for name in names:
         value = env.get(name, "")
         if value:

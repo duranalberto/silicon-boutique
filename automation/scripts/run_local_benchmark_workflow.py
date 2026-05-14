@@ -30,6 +30,7 @@ from silicon_boutique_shared.automation import (  # noqa: E402
 )
 
 from automation.scripts import run_local_benchmark  # noqa: E402
+from silicon_boutique_shared import bigquery as bq_helpers  # noqa: E402
 
 
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
@@ -51,6 +52,19 @@ class LocalWorkflowError(RuntimeError):
         result: CommandResult | None = None,
         suggestion: str = "",
     ) -> None:
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            message: message (str) used by this operation.
+            step: step (str) used by this operation.
+            exit_code: exit code (int | None) used by this operation.
+            result: result (CommandResult | None) used by this operation.
+            suggestion: suggestion (str) used by this operation.
+
+        Returns:
+            None.
+        """
         super().__init__(message)
         self.step = step
         self.exit_code = exit_code
@@ -60,6 +74,25 @@ class LocalWorkflowError(RuntimeError):
 
 @dataclass(frozen=True)
 class WorkflowConfig:
+    """Container for workflow Config state and behavior.
+
+
+    Attributes:
+        run_id: run ID (str) stored on the object.
+        credential_env_file: credential environment file (Path) stored on the object.
+        artifacts_root: artifacts root (Path) stored on the object.
+        artifacts_dir: artifacts dir (Path) stored on the object.
+        test_duration: test duration (str) stored on the object.
+        min_duration_seconds: min duration seconds (int) stored on the object.
+        skip_minikube_repair: skip minikube repair (bool) stored on the object.
+        full_duration: full duration (bool) stored on the object.
+        extra_run_local_args: extra run local arguments (tuple[str, ...]) stored on the object.
+        bigquery_project_id: BigQuery project ID (str) stored on the object.
+        bigquery_dataset: BigQuery dataset (str) stored on the object.
+        bigquery_table: BigQuery table (str) stored on the object.
+        bigquery_location: BigQuery location (str) stored on the object.
+        env_presence: environment presence (dict[str, bool]) stored on the object.
+    """
     run_id: str
     credential_env_file: Path
     artifacts_root: Path
@@ -77,6 +110,8 @@ class WorkflowConfig:
 
 
 class CommandRunner:
+    """Container for command Runner state and behavior.
+    """
     def run(
         self,
         command: list[str],
@@ -84,6 +119,17 @@ class CommandRunner:
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
     ) -> CommandResult:
+        """Run the configured operation.
+
+
+        Args:
+            command: command (list[str]) used by this operation.
+            cwd: cwd (Path | None) used by this operation.
+            env: environment (dict[str, str] | None) used by this operation.
+
+        Returns:
+            CommandResult value produced by run.
+        """
         completed = subprocess.run(
             command,
             cwd=cwd,
@@ -97,6 +143,8 @@ class CommandRunner:
 
 
 class LocalBenchmarkWorkflow:
+    """Container for local Benchmark Workflow state and behavior.
+    """
     def __init__(
         self,
         config: WorkflowConfig,
@@ -104,6 +152,17 @@ class LocalBenchmarkWorkflow:
         runner: CommandRunner | None = None,
         environ: dict[str, str] | None = None,
     ) -> None:
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            config: config (WorkflowConfig) used by this operation.
+            runner: runner (CommandRunner | None) used by this operation.
+            environ: environ (dict[str, str] | None) used by this operation.
+
+        Returns:
+            None.
+        """
         self.config = config
         self.runner = runner or CommandRunner()
         self.environ = dict(os.environ if environ is None else environ)
@@ -114,6 +173,12 @@ class LocalBenchmarkWorkflow:
         self.steps: list[dict[str, Any]] = []
 
     def run(self) -> int:
+        """Run the configured operation.
+
+
+        Returns:
+            int value produced by run.
+        """
         self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.commands_dir.mkdir(parents=True, exist_ok=True)
         self.write_report("running")
@@ -135,6 +200,12 @@ class LocalBenchmarkWorkflow:
         return 0
 
     def log_env_presence(self) -> None:
+        """Compute log environment presence.
+
+
+        Returns:
+            None.
+        """
         safe_presence = {
             key: {
                 "present": present,
@@ -145,6 +216,15 @@ class LocalBenchmarkWorkflow:
         self.append_workflow_log("credential_env_presence=" + json.dumps(safe_presence, sort_keys=True))
 
     def ensure_kubernetes_ready(self) -> None:
+        """Ensure kubernetes ready.
+
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         result = self.run_step(
             "kubectl-context-check",
             [
@@ -190,8 +270,14 @@ class LocalBenchmarkWorkflow:
             )
 
     def preflight_bigquery(self) -> None:
+        """Compute preflight bigquery.
+
+
+        Returns:
+            None.
+        """
         self.run_step(
-            "bigquery-preflight",
+            "BigQuery-preflight",
             [
                 sys.executable,
                 "automation/scripts/load_benchmark_summary_to_bigquery.py",
@@ -206,7 +292,7 @@ class LocalBenchmarkWorkflow:
                 "--schema",
                 "automation/templates/benchmark-summary.bigquery-schema.json",
                 "--load-report-output",
-                str(self.config.artifacts_dir / "bigquery-preflight-report.json"),
+                str(self.config.artifacts_dir / "BigQuery-preflight-report.json"),
                 "--duplicate-policy",
                 "fail",
                 "--preflight-only",
@@ -214,6 +300,12 @@ class LocalBenchmarkWorkflow:
         )
 
     def run_local_benchmark(self) -> None:
+        """Run local benchmark.
+
+
+        Returns:
+            None.
+        """
         command = [
             sys.executable,
             "automation/scripts/run_local_benchmark.py",
@@ -238,6 +330,15 @@ class LocalBenchmarkWorkflow:
         self.run_step("local-benchmark", command)
 
     def validate_bigquery_row(self) -> dict[str, Any]:
+        """Validate BigQuery row.
+
+
+        Returns:
+            dict[str, Any] value produced by validate BigQuery row.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         table = (
             f"{self.config.bigquery_project_id}."
             f"{self.config.bigquery_dataset}."
@@ -245,7 +346,7 @@ class LocalBenchmarkWorkflow:
         )
         query = (
             "SELECT run_id, machine_type, benchmark_start, benchmark_end, summary_status "
-            f"FROM `{table}` WHERE run_id = {sql_string(self.config.run_id)}"
+            f"FROM `{table}` WHERE run_id = {bq_helpers.sql_string(self.config.run_id)}"
         )
         result = self.run_step(
             "bigquery-row-validation",
@@ -319,6 +420,20 @@ class LocalBenchmarkWorkflow:
         *,
         check: bool = True,
     ) -> CommandResult:
+        """Run step.
+
+
+        Args:
+            step: step (str) used by this operation.
+            command: command (list[str]) used by this operation.
+            check: check (bool) used by this operation.
+
+        Returns:
+            CommandResult value produced by run step.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         started_at = utc_now()
         self.append_workflow_log(f"[{started_at}] start {step}: {shell_join(command)}")
         result = self.runner.run(command, cwd=REPO_ROOT, env=self.environ)
@@ -353,6 +468,19 @@ class LocalBenchmarkWorkflow:
         started_at: str,
         finished_at: str,
     ) -> None:
+        """Write command log.
+
+
+        Args:
+            step: step (str) used by this operation.
+            command: command (list[str]) used by this operation.
+            result: result (CommandResult) used by this operation.
+            started_at: started at (str) used by this operation.
+            finished_at: finished at (str) used by this operation.
+
+        Returns:
+            None.
+        """
         path = self.commands_dir / f"{step}.log"
         path.write_text(
             "\n".join(
@@ -374,10 +502,28 @@ class LocalBenchmarkWorkflow:
         )
 
     def append_workflow_log(self, line: str) -> None:
+        """Append workflow log.
+
+
+        Args:
+            line: line (str) used by this operation.
+
+        Returns:
+            None.
+        """
         with self.workflow_log.open("a", encoding="utf-8") as handle:
             handle.write(redact_text(line) + "\n")
 
     def write_issue(self, exc: LocalWorkflowError) -> None:
+        """Write issue.
+
+
+        Args:
+            exc: exc (LocalWorkflowError) used by this operation.
+
+        Returns:
+            None.
+        """
         write_json(
             self.issue_path,
             {
@@ -401,6 +547,17 @@ class LocalBenchmarkWorkflow:
         bigquery_row: dict[str, Any] | None = None,
         issue: str | None = None,
     ) -> None:
+        """Write report.
+
+
+        Args:
+            status: status (str) used by this operation.
+            bigquery_row: BigQuery row (dict[str, Any] | None) used by this operation.
+            issue: issue (str | None) used by this operation.
+
+        Returns:
+            None.
+        """
         write_json(
             self.report_path,
             {
@@ -424,6 +581,18 @@ class LocalBenchmarkWorkflow:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Run the full local SiliconBoutique benchmark workflow and validate BigQuery persistence."
     )
@@ -450,6 +619,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        parser: parser (argparse.ArgumentParser) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not RUN_ID_PATTERN.match(args.run_id) or len(args.run_id) > 46:
         parser.error("--run-id must be lowercase DNS-safe and at most 46 characters")
     if args.min_duration_seconds < 1:
@@ -465,6 +647,19 @@ def config_from_args(
     *,
     environ: dict[str, str] | None = None,
 ) -> WorkflowConfig:
+    """Compute config from arguments.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        environ: environ (dict[str, str] | None) used by this operation.
+
+    Returns:
+        WorkflowConfig value produced by config from arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     env = os.environ if environ is None else environ
     env_values = run_local_benchmark.read_env_file(args.credential_env_file)
     for key, value in env_values.items():
@@ -497,7 +692,26 @@ def config_from_args(
 def resolve_bigquery_settings(
     env_values: dict[str, str], env: dict[str, str]
 ) -> dict[str, str]:
+    """Compute resolve BigQuery settings.
+
+
+    Args:
+        env_values: environment values (dict[str, str]) used by this operation.
+        env: environment (dict[str, str]) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by resolve BigQuery settings.
+    """
     def value(*names: str) -> str:
+        """Compute value.
+
+
+        Args:
+            names: names (str) used by this operation.
+
+        Returns:
+            str value produced by value.
+        """
         for name in names:
             existing = env.get(name, "").strip()
             if existing:
@@ -517,6 +731,16 @@ def resolve_bigquery_settings(
 
 
 def env_presence(env_values: dict[str, str], env: dict[str, str]) -> dict[str, bool]:
+    """Compute environment presence.
+
+
+    Args:
+        env_values: environment values (dict[str, str]) used by this operation.
+        env: environment (dict[str, str]) used by this operation.
+
+    Returns:
+        dict[str, bool] value produced by environment presence.
+    """
     keys = set(env_values) | {
         "PROJECT_ID",
         "BIGQUERY_PROJECT_ID",
@@ -529,14 +753,25 @@ def env_presence(env_values: dict[str, str], env: dict[str, str]) -> dict[str, b
 
 
 def default_run_id() -> str:
+    """Compute default run ID.
+
+
+    Returns:
+        str value produced by default run ID.
+    """
     return datetime.now(timezone.utc).strftime("local-smoke-%Y%m%d-%H%M%S")
 
 
-def sql_string(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
-
 def preview_text(value: str) -> str:
+    """Compute preview text.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by preview text.
+    """
     text = redact_text(value).strip()
     if len(text) <= PREVIEW_LIMIT:
         return text
@@ -544,6 +779,15 @@ def preview_text(value: str) -> str:
 
 
 def redact_text(value: str) -> str:
+    """Compute redact text.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by redact text.
+    """
     redacted = value or ""
     patterns = [
         (r"(?i)(authorization:\s*)(bearer|basic)\s+\S+", r"\1<redacted>"),
@@ -556,10 +800,28 @@ def redact_text(value: str) -> str:
 
 
 def command_for_report(command: list[str]) -> list[str]:
+    """Compute command for report.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+
+    Returns:
+        list[str] value produced by command for report.
+    """
     return [redact_text(part) for part in command]
 
 
 def diagnostic_artifacts(artifacts_dir: Path) -> dict[str, str]:
+    """Compute diagnostic artifacts.
+
+
+    Args:
+        artifacts_dir: artifacts dir (Path) used by this operation.
+
+    Returns:
+        dict[str, str] value produced by diagnostic artifacts.
+    """
     names = (
         "teardown-status.env",
         "teardown-precheck.txt",
@@ -571,16 +833,34 @@ def diagnostic_artifacts(artifacts_dir: Path) -> dict[str, str]:
 
 
 def suggestion_for_step(step: str) -> str:
+    """Compute suggestion for step.
+
+
+    Args:
+        step: step (str) used by this operation.
+
+    Returns:
+        str value produced by suggestion for step.
+    """
     suggestions = {
         "verify-toolchain": "Rebuild or reopen the devcontainer, then rerun the workflow.",
         "repair-minikube": "Check Docker access from the devcontainer and rerun `.devcontainer/post-create.sh`.",
-        "bigquery-preflight": "Check credential.env, ADC/service-account auth, table schema, and BigQuery IAM.",
+        "BigQuery-preflight": "Check credential.env, ADC/service-account auth, table schema, and BigQuery IAM.",
         "local-benchmark": "Inspect workflow logs plus the benchmark artifacts in the run-scoped artifacts directory.",
     }
     return suggestions.get(step, "Inspect the command log for this step.")
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     try:
         environ = dict(os.environ)

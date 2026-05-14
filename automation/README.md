@@ -4,13 +4,36 @@ This directory contains scripts and helpers that extract benchmark metrics, gene
 
 Current subdirectories:
 
+- `lib/`: reusable Python helpers for workflow coordination
 - `scripts/`: executable automation helpers
 - `templates/`: report templates, schemas, and structured output definitions
 
 ## Local Benchmark Orchestration
 
-`scripts/run_local_benchmark_workflow.py` is the recommended one-command local
-workflow. It verifies the local toolchain, starts or repairs the managed
+For human-facing benchmark execution steps, use [`../docs/runbook.md`](../docs/runbook.md). It is the canonical operator guide for setup, local and GCP benchmark commands, diagrams, BigQuery persistence, dashboards, expected outputs, teardown, and troubleshooting.
+
+`scripts/run_benchmark_workflow.py` is the recommended automation entrypoint behind that guide. It can run the local workflow directly, dispatch guarded GCP/AWS GitHub Actions workflows, wait for cloud completion, download artifacts, verify acceptance evidence, and generate the portable dashboard without serving it.
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target local \
+  --profile smoke \
+  --bigquery-env-file credential.env
+```
+
+For cloud runs, the coordinator uses `gh workflow run`; it does not run cloud Terraform locally:
+
+```bash
+python3 automation/scripts/run_benchmark_workflow.py \
+  --target gcp \
+  --project-id "$project_id" \
+  --bigquery-env-file credential.env
+```
+
+Use `--target all` to run local first, dispatch GCP and AWS, verify downloaded artifacts through the acceptance matrix, and generate dashboard files from BigQuery. Use `--no-wait` when you only want dispatch records and GitHub run URLs. Keep this file as script reference; prefer the runbook for copy-paste operator flows.
+
+`scripts/run_local_benchmark_workflow.py` is a lower-level local workflow helper.
+It verifies the local toolchain, starts or repairs the managed
 `siliconboutique` minikube profile when needed, preflights BigQuery, runs a
 short local benchmark with BigQuery persistence enabled, validates the remote
 BigQuery row, and writes run-scoped debug logs.
@@ -34,14 +57,16 @@ Use `--skip-destroy` only for deliberate debugging.
 
 ```bash
 python3 automation/scripts/run_local_benchmark.py \
-  --run-id local-smoke \
   --test-duration 2m \
   --min-duration-seconds 60 \
   --persist-bigquery \
   --bigquery-env-file credential.env
 ```
 
-Local BigQuery persistence stores the canonical `BenchmarkSummary` row in
+Use the unified coordinator for normal local runs; use this helper when you need
+to debug the local BigQuery proof path directly. When `--run-id` is omitted,
+the helper creates a unique `local-smoke-YYYYMMDD-HHMMSS` run ID and Terraform
+derives the matching `silicon-boutique-<run-id>` namespace. Local BigQuery persistence stores the canonical `BenchmarkSummary` row in
 BigQuery, not raw Prometheus time-series samples. Copy
 `credential.env.example` to the ignored `credential.env`, set `PROJECT_ID` and
 `BIGQUERY_*`, and authenticate with Application Default Credentials or an
@@ -134,8 +159,23 @@ For priced GCP runs, also pass `--region`, `--zone`, `--pricing-model`, optional
 `summary_status=complete` requires required metrics and derived fields plus coverage at or above the configured minimum; the default `--min-coverage-ratio 0.95` matches the comparability validator.
 
 The local summary store fails on duplicate `run_id` values by default. Use `--replace` only when intentionally regenerating a summary for the same benchmark run.
+When rerunning `scripts/run_local_benchmark.py` with the same `--run-id`, pass
+`--replace-summary` to forward that replacement intent to summary generation.
 
 ## Comparison Reports
+
+Run a read-only audit against durable BigQuery history when checking stored row
+quality without mutating existing benchmarks:
+
+```bash
+python3 automation/scripts/audit_bigquery_benchmark_summaries.py \
+  --project-id "$PROJECT_ID" \
+  --dataset-id "$BIGQUERY_DATASET" \
+  --table-id "$BIGQUERY_TABLE" \
+  --location "$BIGQUERY_LOCATION" \
+  --schema automation/templates/benchmark-summary.bigquery-schema.json \
+  --report-output artifacts/bigquery-audit-report.json
+```
 
 Generate ranked comparison artifacts from accumulated local summaries:
 

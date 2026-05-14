@@ -1,3 +1,5 @@
+"""Tests for test load benchmark summary to bigquery."""
+
 import importlib.util
 import io
 import json
@@ -22,6 +24,8 @@ spec.loader.exec_module(loader)
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(
         self,
         *,
@@ -32,6 +36,20 @@ class FakeRunner:
         fail_delete=False,
         show_stdout=None,
     ):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            schema: schema used by this operation.
+            duplicate_rows: duplicate rows used by this operation.
+            fail_show: fail show used by this operation.
+            fail_load: fail load used by this operation.
+            fail_delete: fail delete used by this operation.
+            show_stdout: show standard output used by this operation.
+
+        Returns:
+            None.
+        """
         self.schema = schema
         self.duplicate_rows = duplicate_rows or []
         self.fail_show = fail_show
@@ -41,6 +59,15 @@ class FakeRunner:
         self.commands = []
 
     def __call__(self, command):
+        """Handle the object call using the supplied arguments.
+
+
+        Args:
+            command: command used by this operation.
+
+        Returns:
+            Result produced by call.
+        """
         self.commands.append(command)
         if "show" in command:
             if self.fail_show:
@@ -64,6 +91,15 @@ class FakeRunner:
 
 
 def valid_summary(run_id="test-run"):
+    """Compute valid summary.
+
+
+    Args:
+        run_id: run ID used by this operation.
+
+    Returns:
+        Result produced by valid summary.
+    """
     return {
         "architecture": "x86_64",
         "avg_cpu_throttling_ratio": 0.01,
@@ -117,6 +153,16 @@ def valid_summary(run_id="test-run"):
 
 
 def write_store(path, rows):
+    """Write store.
+
+
+    Args:
+        path: path used by this operation.
+        rows: rows used by this operation.
+
+    Returns:
+        None.
+    """
     path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
@@ -124,10 +170,24 @@ def write_store(path, rows):
 
 
 class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
+    """Unit tests covering load Benchmark Summary To Big Query behavior.
+    """
     def load_schema(self):
+        """Load schema.
+
+
+        Returns:
+            Result produced by load schema.
+        """
         return json.loads(BIGQUERY_SCHEMA.read_text(encoding="utf-8"))
 
     def test_load_builds_expected_bq_commands(self):
+        """Verify load builds expected BigQuery commands.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
             write_store(summary_store, [valid_summary()])
@@ -180,6 +240,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertIn("--source_format=NEWLINE_DELIMITED_JSON", runner.commands[3])
 
     def test_duplicate_run_id_is_detected_before_load(self):
+        """Verify duplicate run ID is detected before load.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner(
             schema=self.load_schema(), duplicate_rows=[{"run_id": "test-run"}]
         )
@@ -196,6 +262,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
         self.assertEqual(duplicate_run_ids, {"test-run"})
 
     def test_main_reports_table_inspection_failure(self):
+        """Verify main reports table inspection failure.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
             report = Path(tmpdir) / "bigquery-load-report.json"
@@ -233,6 +305,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertIn("access denied", payload["diagnostics"]["stderr_preview"])
 
     def test_main_reports_non_json_table_inspection_with_preview(self):
+        """Verify main reports non JSON table inspection with preview.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
             report = Path(tmpdir) / "bigquery-load-report.json"
@@ -273,6 +351,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertNotIn("secret", payload["diagnostics"]["stdout_preview"])
 
     def test_table_inspection_allows_warning_prefix_before_json(self):
+        """Verify table inspection allows warning prefix before JSON.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner(
             schema=self.load_schema(),
             show_stdout=(
@@ -292,6 +376,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
         self.assertEqual(len(runner.commands), 1)
 
     def test_dry_run_validates_without_load_command(self):
+        """Verify dry run validates without load command.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
             report = Path(tmpdir) / "bigquery-load-report.json"
@@ -327,6 +417,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertFalse(any("load" in command for command in runner.commands))
 
     def test_multi_row_store_requires_run_id_selection(self):
+        """Verify multi row store requires run ID selection.
+
+
+        Returns:
+            None.
+        """
         rows = [valid_summary("run-a"), valid_summary("run-b")]
 
         with self.assertRaises(loader.BigQueryLoadError):
@@ -335,6 +431,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
         self.assertEqual(loader.select_rows(rows, "run-b")[0]["run_id"], "run-b")
 
     def test_bigquery_schema_matches_canonical_summary_fields(self):
+        """Verify BigQuery schema matches canonical summary fields.
+
+
+        Returns:
+            None.
+        """
         canonical = json.loads(CANONICAL_SCHEMA.read_text(encoding="utf-8"))
         canonical_fields = set(canonical["properties"])
         bigquery_fields = {field["name"] for field in self.load_schema()}
@@ -349,6 +451,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
         self.assertEqual(required_modes, required)
 
     def test_main_success_report_proves_fake_load_and_query_path(self):
+        """Verify main success report proves fake load and query path.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
             report = Path(tmpdir) / "bigquery-load-report.json"
@@ -386,6 +494,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertTrue(any("load" in command for command in runner.commands))
 
     def test_preflight_only_validates_destination_without_summary_store(self):
+        """Verify preflight only validates destination without summary store.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             report = Path(tmpdir) / "bigquery-load-report.json"
             runner = FakeRunner(schema=self.load_schema())
@@ -419,6 +533,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertTrue(all("load" not in command for command in runner.commands))
 
     def test_preflight_write_probe_loads_and_deletes_scratch_table(self):
+        """Verify preflight write probe loads and deletes scratch table.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             report = Path(tmpdir) / "bigquery-load-report.json"
             runner = FakeRunner(schema=self.load_schema())
@@ -465,6 +585,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             )
 
     def test_preflight_write_probe_reports_load_permission_failure(self):
+        """Verify preflight write probe reports load permission failure.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             report = Path(tmpdir) / "bigquery-load-report.json"
             runner = FakeRunner(schema=self.load_schema(), fail_load=True)
@@ -506,6 +632,12 @@ class LoadBenchmarkSummaryToBigQueryTest(unittest.TestCase):
             self.assertTrue(any("rm" in command for command in runner.commands))
 
     def test_preflight_write_probe_reports_cleanup_failure(self):
+        """Verify preflight write probe reports cleanup failure.
+
+
+        Returns:
+            None.
+        """
         runner = FakeRunner(schema=self.load_schema(), fail_delete=True)
 
         with self.assertRaises(loader.BigQueryLoadError) as context:

@@ -28,6 +28,15 @@ Runner = bq_helpers.Runner
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Load one BenchmarkSummary row, query it by run_id, and optionally delete the test row."
     )
@@ -48,10 +57,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args()
     report = base_report(args)
     try:
-        load_report = args.report_output.parent / "bigquery-validation-load-report.json"
+        load_report = args.report_output.parent / "BigQuery-validation-load-report.json"
         load_one_row(args=args, load_report=load_report)
         query_result = query_loaded_row(args=args, runner=run_bq)
         report.update(
@@ -75,9 +90,20 @@ def main() -> int:
 
 
 def base_report(args: argparse.Namespace) -> dict[str, Any]:
+    """Compute base report.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by base report.
+    """
     return {
         "status": "pending",
-        "summary_table": loader.table_sql_name(args.project_id, args.dataset_id, args.table_id),
+        "summary_table": bq_helpers.table_sql_name(
+            args.project_id, args.dataset_id, args.table_id
+        ),
         "run_id": args.run_id,
         "summary_store": str(args.summary_store),
         "cleanup_status": "not_requested",
@@ -86,6 +112,19 @@ def base_report(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def load_one_row(*, args: argparse.Namespace, load_report: Path) -> None:
+    """Load one row.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        load_report: load report (Path) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     rows = loader.select_rows(loader.read_summary_rows(args.summary_store), args.run_id)
     schema = loader.load_bigquery_schema(args.schema)
     loader.validate_destination(args.project_id, args.dataset_id, args.table_id, args.location)
@@ -121,7 +160,9 @@ def load_one_row(*, args: argparse.Namespace, load_report: Path) -> None:
         load_report,
         {
             "status": "loaded",
-            "summary_table": loader.table_sql_name(args.project_id, args.dataset_id, args.table_id),
+            "summary_table": bq_helpers.table_sql_name(
+                args.project_id, args.dataset_id, args.table_id
+            ),
             "row_count": len(rows),
             "run_ids": [args.run_id],
         },
@@ -129,10 +170,23 @@ def load_one_row(*, args: argparse.Namespace, load_report: Path) -> None:
 
 
 def query_loaded_row(*, args: argparse.Namespace, runner: Runner) -> dict[str, Any]:
+    """Query loaded row.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by query loaded row.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     query = (
         "SELECT run_id FROM "
-        f"`{loader.table_sql_name(args.project_id, args.dataset_id, args.table_id)}` "
-        f"WHERE run_id = {loader.sql_string(args.run_id)}"
+        f"`{bq_helpers.table_sql_name(args.project_id, args.dataset_id, args.table_id)}` "
+        f"WHERE run_id = {bq_helpers.sql_string(args.run_id)}"
     )
     result = runner(
         bq_helpers.query_command(args.project_id, args.location, query)
@@ -150,10 +204,23 @@ def query_loaded_row(*, args: argparse.Namespace, runner: Runner) -> dict[str, A
 
 
 def cleanup_loaded_row(*, args: argparse.Namespace, runner: Runner) -> None:
+    """Clean up loaded row.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     query = (
         "DELETE FROM "
-        f"`{loader.table_sql_name(args.project_id, args.dataset_id, args.table_id)}` "
-        f"WHERE run_id = {loader.sql_string(args.run_id)}"
+        f"`{bq_helpers.table_sql_name(args.project_id, args.dataset_id, args.table_id)}` "
+        f"WHERE run_id = {bq_helpers.sql_string(args.run_id)}"
     )
     result = runner(
         bq_helpers.query_command(
@@ -168,6 +235,18 @@ def cleanup_loaded_row(*, args: argparse.Namespace, runner: Runner) -> None:
 
 
 def run_bq(command: list[str]) -> CommandResult:
+    """Run bigQuery.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+
+    Returns:
+        CommandResult value produced by run bigquery.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return bq_helpers.run_bq(command)
     except bq_helpers.BigQueryHelperError as exc:

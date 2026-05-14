@@ -1,3 +1,5 @@
+"""Tests for test validate local comparison."""
+
 import json
 import sys
 import tempfile
@@ -14,17 +16,43 @@ import validate_local_comparison
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(self):
+        """Initialize the object with the provided configuration.
+
+
+        Returns:
+            None.
+        """
         self.commands = []
 
     def __call__(self, command, cwd):
+        """Handle the object call using the supplied arguments.
+
+
+        Args:
+            command: command used by this operation.
+            cwd: cwd used by this operation.
+
+        Returns:
+            Result produced by call.
+        """
         rendered = [str(part) for part in command]
         self.commands.append({"command": rendered, "cwd": str(cwd)})
         return validate_local_comparison.CommandResult(0, "", "")
 
 
 class ValidateLocalComparisonTest(unittest.TestCase):
+    """Unit tests covering validate Local Comparison behavior.
+    """
     def test_uses_existing_store_when_two_comparable_rows_exist(self):
+        """Verify uses existing store when two comparable rows exist.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             summary_store = base / "benchmark-summaries.ndjson"
@@ -45,6 +73,12 @@ class ValidateLocalComparisonTest(unittest.TestCase):
             self.assertNoCloudCommands(runner.commands)
 
     def test_falls_back_to_deterministic_fixtures_for_legacy_store(self):
+        """Verify falls back to deterministic fixtures for legacy store.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             summary_store = base / "benchmark-summaries.ndjson"
@@ -69,6 +103,12 @@ class ValidateLocalComparisonTest(unittest.TestCase):
             self.assertNoCloudCommands(runner.commands)
 
     def test_outputs_passing_comparability_and_deterministic_rankings(self):
+        """Verify outputs passing comparability and deterministic rankings.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             summary_store = base / "missing.ndjson"
@@ -94,6 +134,15 @@ class ValidateLocalComparisonTest(unittest.TestCase):
             self.assertIn("local-comparison-partial-001", markdown)
 
     def assertNoCloudCommands(self, commands):
+        """Assert that no Cloud Commands matches expectations.
+
+
+        Args:
+            commands: commands used by this operation.
+
+        Returns:
+            None.
+        """
         rendered = [" ".join(item["command"]) for item in commands]
         for item in commands:
             self.assertNotIn(item["command"][0], {"aws", "bq", "gcloud"})
@@ -102,6 +151,17 @@ class ValidateLocalComparisonTest(unittest.TestCase):
 
 
 def run_validation(base, summary_store, runner):
+    """Run validation.
+
+
+    Args:
+        base: base used by this operation.
+        summary_store: summary store used by this operation.
+        runner: runner used by this operation.
+
+    Returns:
+        Result produced by run validation.
+    """
     config = validate_local_comparison.ValidationConfig(
         summary_store=summary_store,
         artifacts_dir=base / "comparison",
@@ -112,6 +172,16 @@ def run_validation(base, summary_store, runner):
 
 
 def write_ndjson(path, rows):
+    """Write nDJSON.
+
+
+    Args:
+        path: path used by this operation.
+        rows: rows used by this operation.
+
+    Returns:
+        None.
+    """
     path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
@@ -119,10 +189,28 @@ def write_ndjson(path, rows):
 
 
 def read_ndjson(path):
+    """Read nDJSON.
+
+
+    Args:
+        path: path used by this operation.
+
+    Returns:
+        Result produced by read NDJSON.
+    """
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def read_json(path):
+    """Read jSON.
+
+
+    Args:
+        path: path used by this operation.
+
+    Returns:
+        Result produced by read JSON.
+    """
     return json.loads(path.read_text(encoding="utf-8"))
 
 

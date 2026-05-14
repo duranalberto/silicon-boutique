@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run local comparison validation without cloud credentials."""
+"""Command-line workflow for validate local comparison in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -35,6 +39,17 @@ class LocalComparisonValidationError(RuntimeError):
 
 @dataclass(frozen=True)
 class ValidationConfig:
+    """Container for validation Config state and behavior.
+
+
+    Attributes:
+        summary_store: summary store (Path) stored on the object.
+        artifacts_dir: artifacts dir (Path) stored on the object.
+        schema: schema (Path) stored on the object.
+        repo_root: repo root (Path) stored on the object.
+        min_duration_seconds: min duration seconds (int) stored on the object.
+        min_coverage_ratio: min coverage ratio (float) stored on the object.
+    """
     summary_store: Path
     artifacts_dir: Path
     schema: Path
@@ -47,6 +62,18 @@ Runner = Callable[[list[str], Path], CommandResult]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Validate local comparison evidence with deterministic fixtures."
     )
@@ -64,6 +91,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (list[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     config = ValidationConfig(
         summary_store=args.summary_store,
@@ -96,6 +132,16 @@ def run_validation(
     *,
     runner: Runner = None,
 ) -> dict[str, Any]:
+    """Run validation.
+
+
+    Args:
+        config: config (ValidationConfig) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by run validation.
+    """
     runner = runner or run_command
     config.artifacts_dir.mkdir(parents=True, exist_ok=True)
     check_results = run_static_checks(config, runner)
@@ -166,6 +212,19 @@ def run_validation(
 
 
 def run_static_checks(config: ValidationConfig, runner: Runner) -> list[dict[str, Any]]:
+    """Run static checks.
+
+
+    Args:
+        config: config (ValidationConfig) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by run static checks.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     aws_root = config.repo_root / "infra" / "terraform" / "aws-eks"
     checks = [
         ([sys.executable, "-m", "unittest", "discover", "-s", "automation/tests"], config.repo_root),
@@ -211,12 +270,30 @@ def run_static_checks(config: ValidationConfig, runner: Runner) -> list[dict[str
 
 @dataclass(frozen=True)
 class SelectedRows:
+    """Container for selected Rows state and behavior.
+
+
+    Attributes:
+        source: source (str) stored on the object.
+        reason: reason (str) stored on the object.
+        valid_rows: valid rows (list[dict[str, Any]]) stored on the object.
+    """
     source: str
     reason: str
     valid_rows: list[dict[str, Any]]
 
 
 def select_validation_rows(config: ValidationConfig, schema: dict[str, Any]) -> SelectedRows:
+    """Select validation rows.
+
+
+    Args:
+        config: config (ValidationConfig) used by this operation.
+        schema: schema (dict[str, Any]) used by this operation.
+
+    Returns:
+        SelectedRows value produced by select validation rows.
+    """
     diagnostic_path = config.artifacts_dir.parent / "local-existing-comparability-check.json"
     existing_path = resolve_path(config.repo_root, config.summary_store)
     schema_fields = comparability.schema_field_set(schema)
@@ -274,6 +351,18 @@ def accepted_rows(
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> list[dict[str, Any]]:
+    """Compute accepted rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        schema_fields: schema fields (set[str]) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by accepted rows.
+    """
     accepted: list[dict[str, Any]] = []
     for index, row in enumerate(rows, 1):
         reasons = comparability.rejection_reasons(
@@ -295,6 +384,12 @@ def accepted_rows(
 
 
 def comparable_fixture_rows() -> list[dict[str, Any]]:
+    """Compute comparable fixture rows.
+
+
+    Returns:
+        list[dict[str, Any]] value produced by comparable fixture rows.
+    """
     return [
         fixture_row(
             "local-comparison-fast-001",
@@ -355,6 +450,12 @@ def comparable_fixture_rows() -> list[dict[str, Any]]:
 
 
 def partial_fixture_row() -> dict[str, Any]:
+    """Compute partial fixture row.
+
+
+    Returns:
+        dict[str, Any] value produced by partial fixture row.
+    """
     row = fixture_row(
         "local-comparison-partial-001",
         machine_type="local-partial",
@@ -399,6 +500,32 @@ def fixture_row(
     benchmark_end: str,
     duration_seconds: int = 1800,
 ) -> dict[str, Any]:
+    """Compute fixture row.
+
+
+    Args:
+        run_id: run ID (str) used by this operation.
+        machine_type: machine type (str) used by this operation.
+        processor_family: processor family (str) used by this operation.
+        architecture: architecture (str) used by this operation.
+        avg_cpu_usage_cores: avg CPU usage cores (float) used by this operation.
+        max_cpu_usage_cores: max CPU usage cores (float) used by this operation.
+        memory_gb: memory GB (float) used by this operation.
+        latency_p50: latency p50 (float) used by this operation.
+        latency_p95: latency p95 (float) used by this operation.
+        latency_p99: latency p99 (float) used by this operation.
+        latency_max: latency max (float) used by this operation.
+        request_total: request total (int) used by this operation.
+        avg_rps: avg rps (float) used by this operation.
+        failures: failures (int) used by this operation.
+        coverage: coverage (float) used by this operation.
+        benchmark_start: benchmark start (str) used by this operation.
+        benchmark_end: benchmark end (str) used by this operation.
+        duration_seconds: duration seconds (int) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by fixture row.
+    """
     success = request_total - failures
     return {
         "architecture": architecture,
@@ -455,6 +582,16 @@ def fixture_row(
 def overall_status(
     comparability_report: dict[str, Any], comparison_report: dict[str, Any]
 ) -> str:
+    """Compute overall status.
+
+
+    Args:
+        comparability_report: comparability report (dict[str, Any]) used by this operation.
+        comparison_report: comparison report (dict[str, Any]) used by this operation.
+
+    Returns:
+        str value produced by overall status.
+    """
     if comparability_report.get("comparability_status") != "pass":
         return "fail"
     if comparison_report.get("status") not in {"pass", "warn"}:
@@ -465,6 +602,19 @@ def overall_status(
 
 
 def run_command(command: list[str], cwd: Path) -> CommandResult:
+    """Run command.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+        cwd: cwd (Path) used by this operation.
+
+    Returns:
+        CommandResult value produced by run command.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     env = None
     if command[:4] == [sys.executable, "-m", "unittest", "discover"] and "mcp-server/tests" in command:
         env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "mcp-server" / "src")}

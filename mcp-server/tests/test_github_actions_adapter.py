@@ -1,3 +1,5 @@
+"""Tests for test GitHub actions adapter."""
+
 import json
 import os
 import subprocess
@@ -27,7 +29,15 @@ from silicon_boutique_mcp.models import BenchmarkRunRequest  # noqa: E402
 
 
 class GitHubActionsAdapterTest(unittest.TestCase):
+    """Unit tests covering git Hub Actions Adapter behavior.
+    """
     def env(self):
+        """Compute environment.
+
+
+        Returns:
+            Result produced by environment.
+        """
         return {
             **os.environ,
             "PYTHONPATH": str(MCP_SRC),
@@ -37,6 +47,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         }
 
     def config(self):
+        """Compute config.
+
+
+        Returns:
+            Result produced by config.
+        """
         return GitHubActionsConfig(
             token="test-token",
             owner="acme",
@@ -46,6 +62,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         )
 
     def request(self):
+        """Compute request.
+
+
+        Returns:
+            Result produced by request.
+        """
         return BenchmarkRunRequest(
             cloud_provider="gcp",
             project_id="test-project",
@@ -63,6 +85,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         )
 
     def test_env_config_uses_expected_defaults_and_fallbacks(self):
+        """Verify environment config uses expected defaults and fallbacks.
+
+
+        Returns:
+            None.
+        """
         config = GitHubActionsConfig.from_env(
             {
                 "GITHUB_TOKEN": "token",
@@ -78,6 +106,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(config.bigquery_dataset, "silicon_boutique")
 
     def test_env_config_requires_token_and_repository(self):
+        """Verify environment config requires token and repository.
+
+
+        Returns:
+            None.
+        """
         with self.assertRaises(GitHubActionsAdapterError):
             GitHubActionsConfig.from_env({})
         with self.assertRaises(GitHubActionsAdapterError):
@@ -89,6 +123,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
             )
 
     def test_workflow_inputs_match_benchmark_workflow(self):
+        """Verify workflow inputs match benchmark workflow.
+
+
+        Returns:
+            None.
+        """
         inputs = workflow_inputs(self.request(), self.config())
 
         self.assertEqual(inputs["project_id"], "test-project")
@@ -100,6 +140,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIs(inputs["acceptance_demo"], False)
 
     def test_dispatch_200_returns_run_details(self):
+        """Verify dispatch 200 returns run details.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -130,6 +176,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(body["ref"], "main")
 
     def test_dispatch_204_falls_back_to_recent_workflow_run_lookup(self):
+        """Verify dispatch 204 falls back to recent workflow run lookup.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(status=204),
@@ -159,6 +211,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("event=workflow_dispatch", transport.calls[1]["url"])
 
     def test_dispatch_200_without_run_details_uses_lookup(self):
+        """Verify dispatch 200 without run details uses lookup.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(status=200, body=b"{}"),
@@ -185,6 +243,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(identity.run_id, "gha-789-1")
 
     def test_dispatch_http_errors_are_non_secret(self):
+        """Verify dispatch HTTP errors are non secret.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -206,6 +270,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertNotIn("test-token", message)
 
     def test_missing_workflow_error_points_to_configuration(self):
+        """Verify missing workflow error points to configuration.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -222,6 +292,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("repository and workflow configuration", str(context.exception))
 
     def test_malformed_dispatch_response_fails_clearly(self):
+        """Verify malformed dispatch response fails clearly.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport([HttpResponse(status=200, body=b"not-json")])
         controller = GitHubActionsBenchmarkRunController(self.config(), transport)
 
@@ -231,6 +307,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("not valid JSON", str(context.exception))
 
     def test_lookup_fails_when_no_matching_run_exists(self):
+        """Verify lookup fails when no matching run exists.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(status=204),
@@ -248,6 +330,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("no matching workflow run", str(context.exception))
 
     def test_lookup_fails_on_ambiguous_newest_runs(self):
+        """Verify lookup fails on ambiguous newest runs.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(status=204),
@@ -280,6 +368,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("multiple workflow runs", str(context.exception))
 
     def test_lookup_http_rate_limit_error_is_reported(self):
+        """Verify lookup HTTP rate limit error is reported.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(status=204),
@@ -300,6 +394,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("rate limit", str(context.exception))
 
     def test_status_mapping_covers_github_run_states(self):
+        """Verify status mapping covers GitHub run states.
+
+
+        Returns:
+            None.
+        """
         expected = {
             ("queued", None): "queued",
             ("requested", None): "queued",
@@ -319,6 +419,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
                 self.assertEqual(map_workflow_run_status(status, conclusion), mapped)
 
     def test_parse_benchmark_run_id_accepts_canonical_and_numeric_ids(self):
+        """Verify parse benchmark run ID accepts canonical and numeric IDs.
+
+
+        Returns:
+            None.
+        """
         canonical = parse_benchmark_run_id("gha-123-2")
         numeric = parse_benchmark_run_id("123")
 
@@ -332,12 +438,24 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(numeric.canonical_run_id, "gha-123-1")
 
     def test_parse_benchmark_run_id_rejects_invalid_ids(self):
+        """Verify parse benchmark run ID rejects invalid IDs.
+
+
+        Returns:
+            None.
+        """
         for run_id in ("", "gha-123", "gha-abc-1", "local-run"):
             with self.subTest(run_id=run_id):
                 with self.assertRaises(GitHubActionsAdapterError):
                     parse_benchmark_run_id(run_id)
 
     def test_get_status_returns_workflow_trace_for_latest_attempt(self):
+        """Verify get status returns workflow trace for latest attempt.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -368,6 +486,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("/actions/runs/123", transport.calls[0]["url"])
 
     def test_get_status_normalizes_bare_numeric_run_id(self):
+        """Verify get status normalizes bare numeric run ID.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -384,6 +508,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(len(transport.calls), 1)
 
     def test_get_status_uses_attempt_endpoint_for_older_attempt(self):
+        """Verify get status uses attempt endpoint for older attempt.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -411,6 +541,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("/actions/runs/123/attempts/2", transport.calls[1]["url"])
 
     def test_get_status_returns_unknown_for_missing_run(self):
+        """Verify get status returns unknown for missing run.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport([HttpResponse(status=404, body=b'{"message":"Not Found"}')])
         controller = GitHubActionsBenchmarkRunController(self.config(), transport)
 
@@ -420,6 +556,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(trace.identity.run_id, "gha-999-1")
 
     def test_get_status_errors_are_non_secret(self):
+        """Verify get status errors are non secret.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport(
             [
                 HttpResponse(
@@ -438,6 +580,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertNotIn("test-token", message)
 
     def test_get_status_malformed_json_fails_clearly(self):
+        """Verify get status malformed JSON fails clearly.
+
+
+        Returns:
+            None.
+        """
         transport = FakeTransport([HttpResponse(status=200, body=b"not-json")])
         controller = GitHubActionsBenchmarkRunController(self.config(), transport)
 
@@ -447,6 +595,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertIn("not valid JSON", str(context.exception))
 
     def test_get_status_trace_omits_unneeded_github_payload_fields(self):
+        """Verify get status trace omits unneeded GitHub payload fields.
+
+
+        Returns:
+            None.
+        """
         payload = workflow_run_payload(
             actor={"login": "octocat", "email": "octocat@example.com"},
             repository={"full_name": "acme/silicon-boutique"},
@@ -465,6 +619,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertNotIn("repository", rendered)
 
     def test_cli_trigger_emits_identity_json(self):
+        """Verify cLI trigger emits identity JSON.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             request_path = Path(tmpdir) / "request.json"
             request_path.write_text(
@@ -512,6 +672,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         self.assertEqual(payload["external_run_id"], "321")
 
     def test_cli_live_status_emits_identity_json(self):
+        """Verify cLI live status emits identity JSON.
+
+
+        Returns:
+            None.
+        """
         with GitHubApiStub() as stub:
             env = {
                 **self.env(),
@@ -544,6 +710,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         "guarded GitHub integration test is disabled by default",
     )
     def test_guarded_integration_dispatches_branch_workflow(self):
+        """Verify guarded integration dispatches branch workflow.
+
+
+        Returns:
+            None.
+        """
         controller = GitHubActionsBenchmarkRunController.from_env()
 
         identity = controller.trigger_benchmark_run(self.request())
@@ -557,6 +729,12 @@ class GitHubActionsAdapterTest(unittest.TestCase):
         "guarded GitHub status integration test is disabled by default",
     )
     def test_guarded_integration_queries_workflow_status(self):
+        """Verify guarded integration queries workflow status.
+
+
+        Returns:
+            None.
+        """
         controller = GitHubActionsBenchmarkRunController.from_env()
 
         trace = controller.get_benchmark_status(
@@ -568,11 +746,37 @@ class GitHubActionsAdapterTest(unittest.TestCase):
 
 
 class FakeTransport:
+    """Test double that records transport interactions.
+    """
     def __init__(self, responses):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            responses: responses used by this operation.
+
+        Returns:
+            None.
+        """
         self.responses = list(responses)
         self.calls = []
 
     def request(self, method, url, *, headers, body=None):
+        """Compute request.
+
+
+        Args:
+            method: method used by this operation.
+            url: uRL used by this operation.
+            headers: headers used by this operation.
+            body: body used by this operation.
+
+        Returns:
+            Result produced by request.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         self.calls.append(
             {
                 "method": method,
@@ -587,9 +791,28 @@ class FakeTransport:
 
 
 class GitHubApiStub:
+    """Unit tests covering git Hub API Stub behavior.
+    """
     def __enter__(self):
+        """Enter the context manager and return the active resource.
+
+
+        Returns:
+            Result produced by enter.
+        """
         class Handler(BaseHTTPRequestHandler):
+            """Unit tests covering handler behavior.
+            """
             def do_POST(handler):
+                """Compute do POST.
+
+
+                Args:
+                    handler: handler used by this operation.
+
+                Returns:
+                    None.
+                """
                 length = int(handler.headers.get("content-length", "0"))
                 handler.rfile.read(length)
                 handler.send_response(200)
@@ -605,6 +828,15 @@ class GitHubApiStub:
                 )
 
             def do_GET(handler):
+                """Compute do GET.
+
+
+                Args:
+                    handler: handler used by this operation.
+
+                Returns:
+                    None.
+                """
                 handler.send_response(200)
                 handler.send_header("Content-Type", "application/json")
                 handler.end_headers()
@@ -620,6 +852,16 @@ class GitHubApiStub:
                 )
 
             def log_message(self, format, *args):
+                """Compute log message.
+
+
+                Args:
+                    format: format used by this operation.
+                    args: arguments used by this operation.
+
+                Returns:
+                    None.
+                """
                 return
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -631,6 +873,17 @@ class GitHubApiStub:
         return self
 
     def __exit__(self, exc_type, exc, traceback):
+        """Exit the context manager and release owned resources.
+
+
+        Args:
+            exc_type: exc type used by this operation.
+            exc: exc used by this operation.
+            traceback: traceback used by this operation.
+
+        Returns:
+            None.
+        """
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
@@ -646,6 +899,21 @@ def workflow_run_payload(
     actor=None,
     repository=None,
 ):
+    """Compute workflow run payload.
+
+
+    Args:
+        workflow_run_id: workflow run ID used by this operation.
+        run_attempt: run attempt used by this operation.
+        status: status used by this operation.
+        conclusion: conclusion used by this operation.
+        html_url: hTML URL used by this operation.
+        actor: actor used by this operation.
+        repository: repository used by this operation.
+
+    Returns:
+        Result produced by workflow run payload.
+    """
     return {
         "id": workflow_run_id,
         "run_attempt": run_attempt,

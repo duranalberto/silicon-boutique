@@ -1,7 +1,7 @@
 """Abstract ports for the MCP service boundary.
 
 The interfaces in this module intentionally describe what the MCP layer needs
-without binding it to GitHub Actions, BigQuery, Terraform, Helm, or automation
+without binding it to GitHub Actions, bigquery, Terraform, Helm, or automation
 script internals.
 """
 
@@ -25,7 +25,15 @@ class BenchmarkRunController(Protocol):
         ...
 
     def get_benchmark_status(self, run_id: str) -> WorkflowTrace:
-        """Return trace metadata for a known benchmark run."""
+        """Return benchmark status.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            WorkflowTrace value produced by get benchmark status.
+        """
         ...
 
 
@@ -40,5 +48,16 @@ class BenchmarkHistoryStore(Protocol):
         architecture: str | None = None,
         limit: int = 10,
     ) -> list[BenchmarkSummaryReference]:
-        """Return stored benchmark summary references matching the query."""
+        """Query historical metrics.
+
+
+        Args:
+            machine_type: machine type (str | None) used by this operation.
+            processor_family: processor family (str | None) used by this operation.
+            architecture: architecture (str | None) used by this operation.
+            limit: limit (int) used by this operation.
+
+        Returns:
+            list[BenchmarkSummaryReference] value produced by query historical metrics.
+        """
         ...

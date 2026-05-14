@@ -1,3 +1,5 @@
+"""Tests for test monitoring chart."""
+
 import json
 import unittest
 from pathlib import Path
@@ -18,7 +20,15 @@ DASHBOARD_KEY = "online-boutique-benchmark.json"
 
 
 class MonitoringChartTest(unittest.TestCase):
+    """Unit tests covering monitoring Chart behavior.
+    """
     def test_default_render_delivers_grafana_and_benchmark_dashboard(self):
+        """Verify default render delivers Grafana and benchmark dashboard.
+
+
+        Returns:
+            None.
+        """
         documents = render_chart()
 
         self.assertIsNotNone(find_document(documents, "Deployment", "sb-monitoring-grafana"))
@@ -70,6 +80,12 @@ class MonitoringChartTest(unittest.TestCase):
                 self.assertEqual(target["datasource"]["uid"], "prometheus")
 
     def test_recording_rules_compute_workload_cpu_utilization(self):
+        """Verify recording rules compute workload CPU utilization.
+
+
+        Returns:
+            None.
+        """
         documents = render_chart()
         rules = find_document(
             documents,
@@ -87,12 +103,27 @@ class MonitoringChartTest(unittest.TestCase):
         self.assertIn("silicon_boutique:workload_node_cpu_cores", rules)
 
     def test_dashboard_configmap_is_not_rendered_when_grafana_is_disabled(self):
+        """Verify dashboard configmap is not rendered when Grafana is disabled.
+
+
+        Returns:
+            None.
+        """
         documents = render_chart("--set", "kube-prometheus-stack.grafana.enabled=false")
 
         self.assertIsNone(find_dashboard_configmap(documents))
 
 
 def render_chart(*extra_args):
+    """Render chart.
+
+
+    Args:
+        extra_args: extra arguments used by this operation.
+
+    Returns:
+        Result produced by render chart.
+    """
     return split_documents(
         render_helm_template(
             REPO_ROOT,
@@ -121,6 +152,17 @@ def render_chart(*extra_args):
 
 
 def find_document(documents, kind, name):
+    """Find document.
+
+
+    Args:
+        documents: documents used by this operation.
+        kind: kind used by this operation.
+        name: name used by this operation.
+
+    Returns:
+        Result produced by find document.
+    """
     for document in documents:
         if top_level_value(document, "kind") == kind and metadata_name(document) == name:
             return document
@@ -128,6 +170,15 @@ def find_document(documents, kind, name):
 
 
 def find_dashboard_configmap(documents):
+    """Find dashboard configmap.
+
+
+    Args:
+        documents: documents used by this operation.
+
+    Returns:
+        Result produced by find dashboard configmap.
+    """
     for document in documents:
         if top_level_value(document, "kind") != "ConfigMap":
             continue

@@ -11,6 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import utc_now, write_json
+
 
 BYTES_PER_GB = 1_000_000_000
 MS_PER_SECOND = 1000
@@ -49,6 +56,15 @@ class SummaryError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Generate a query-friendly SiliconBoutique benchmark summary."
     )
@@ -92,6 +108,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args()
     try:
         metrics_payload = load_json(args.metrics_input)
@@ -132,6 +154,18 @@ def main() -> int:
 
 
 def load_json(path: Path) -> dict[str, Any]:
+    """Load jSON.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by load JSON.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -161,6 +195,32 @@ def build_summary(
     generated_at: str | None,
     min_coverage_ratio: float,
 ) -> dict[str, Any]:
+    """Build summary.
+
+
+    Args:
+        metrics_payload: metrics payload (dict[str, Any]) used by this operation.
+        loadgenerator_stats: loadgenerator stats (dict[str, Any] | None) used by this operation.
+        pricing_table: pricing table (list[dict[str, Any]] | None) used by this operation.
+        environment: environment (str) used by this operation.
+        machine_type: machine type (str) used by this operation.
+        processor_family: processor family (str) used by this operation.
+        architecture: architecture (str) used by this operation.
+        cloud_provider: cloud provider (str) used by this operation.
+        region: region (str | None) used by this operation.
+        zone: zone (str | None) used by this operation.
+        node_count: node count (int) used by this operation.
+        pricing_model: pricing model (str) used by this operation.
+        cpu_platform: CPU platform (str | None) used by this operation.
+        concurrent_users: concurrent users (str | None) used by this operation.
+        users_per_second: users per second (str | None) used by this operation.
+        load_profile_source: load profile source (str) used by this operation.
+        generated_at: generated at (str | None) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build summary.
+    """
     window = metrics_payload.get("window", {})
     quality = metrics_payload.get("quality", {})
     metrics = metrics_payload.get("metrics", {})
@@ -270,6 +330,19 @@ def build_summary(
 
 
 def validate_summary(summary: dict[str, Any], *, strict: bool) -> None:
+    """Validate summary.
+
+
+    Args:
+        summary: summary (dict[str, Any]) used by this operation.
+        strict: strict (bool) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     identity_fields = (
         "run_id",
         "namespace",
@@ -344,6 +417,18 @@ def validate_summary(summary: dict[str, Any], *, strict: bool) -> None:
 
 
 def validate_cpu_utilization_bounds(summary: dict[str, Any]) -> None:
+    """Validate CPU utilization bounds.
+
+
+    Args:
+        summary: summary (dict[str, Any]) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     node_count = int_or_none(summary.get("node_count")) or 1
     upper_bound = max(100.0, 100.0 * node_count)
     invalid_fields: list[str] = []
@@ -362,6 +447,17 @@ def validate_cpu_utilization_bounds(summary: dict[str, Any]) -> None:
 
 
 def persist_summary(path: Path, summary: dict[str, Any], *, replace: bool) -> None:
+    """Compute persist summary.
+
+
+    Args:
+        path: path (Path) used by this operation.
+        summary: summary (dict[str, Any]) used by this operation.
+        replace: replace (bool) used by this operation.
+
+    Returns:
+        None.
+    """
     existing_rows = read_store_rows(path)
     run_id = summary["run_id"]
     retained_rows = [row for row in existing_rows if row.get("run_id") != run_id]
@@ -375,6 +471,20 @@ def persist_summary(path: Path, summary: dict[str, Any], *, replace: bool) -> No
 
 
 def assert_summary_store_accepts(path: Path, run_id: str, *, replace: bool) -> None:
+    """Assert that summary store accepts matches expectations.
+
+
+    Args:
+        path: path (Path) used by this operation.
+        run_id: run ID (str) used by this operation.
+        replace: replace (bool) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     existing_rows = read_store_rows(path)
     duplicate_found = any(row.get("run_id") == run_id for row in existing_rows)
     if duplicate_found and not replace:
@@ -384,6 +494,18 @@ def assert_summary_store_accepts(path: Path, run_id: str, *, replace: bool) -> N
 
 
 def read_store_rows(path: Path) -> list[dict[str, Any]]:
+    """Read store rows.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by read store rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -404,12 +526,19 @@ def read_store_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
 def load_pricing_table(path: Path) -> list[dict[str, Any]]:
+    """Load pricing table.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by load pricing table.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     payload = load_json(path)
     prices = payload.get("prices")
     if not isinstance(prices, list):
@@ -425,6 +554,19 @@ def lookup_hourly_price(
     machine_type: str,
     pricing_model: str,
 ) -> float | None:
+    """Look up hourly price.
+
+
+    Args:
+        pricing_table: pricing table (list[dict[str, Any]] | None) used by this operation.
+        cloud_provider: cloud provider (str) used by this operation.
+        region: region (str | None) used by this operation.
+        machine_type: machine type (str) used by this operation.
+        pricing_model: pricing model (str) used by this operation.
+
+    Returns:
+        float | None value produced by lookup hourly price.
+    """
     if not pricing_table:
         return None
     for entry in pricing_table:
@@ -441,6 +583,17 @@ def lookup_hourly_price(
 def benchmark_compute_cost(
     *, node_hourly_price_usd: float | None, node_count: int, duration_seconds: int | None
 ) -> float | None:
+    """Compute benchmark compute cost.
+
+
+    Args:
+        node_hourly_price_usd: node hourly price usd (float | None) used by this operation.
+        node_count: node count (int) used by this operation.
+        duration_seconds: duration seconds (int | None) used by this operation.
+
+    Returns:
+        float | None value produced by benchmark compute cost.
+    """
     if node_hourly_price_usd is None or duration_seconds is None:
         return None
     return round(node_hourly_price_usd * node_count * duration_seconds / 3600, 8)
@@ -449,12 +602,31 @@ def benchmark_compute_cost(
 def cost_per_1m_requests(
     *, compute_cost_usd: float | None, request_success_count: int | None
 ) -> float | None:
+    """Compute cost per 1m requests.
+
+
+    Args:
+        compute_cost_usd: compute cost usd (float | None) used by this operation.
+        request_success_count: request success count (int | None) used by this operation.
+
+    Returns:
+        float | None value produced by cost per 1m requests.
+    """
     if compute_cost_usd is None or request_success_count is None or request_success_count <= 0:
         return None
     return round(compute_cost_usd / request_success_count * 1_000_000, 8)
 
 
 def normalize_pricing_model(value: Any) -> str | None:
+    """Normalize pricing model.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        str | None value produced by normalize pricing model.
+    """
     cleaned = clean_required_value(value)
     if cleaned is None:
         return None
@@ -464,6 +636,15 @@ def normalize_pricing_model(value: Any) -> str | None:
 
 
 def int_or_none(value: Any) -> int | None:
+    """Compute integer or none.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        int | None value produced by integer or none.
+    """
     if isinstance(value, bool) or value is None:
         return None
     try:
@@ -474,6 +655,15 @@ def int_or_none(value: Any) -> int | None:
 
 
 def number_or_none(value: Any) -> float | None:
+    """Compute number or none.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        float | None value produced by number or none.
+    """
     if isinstance(value, bool) or value is None:
         return None
     try:
@@ -483,6 +673,17 @@ def number_or_none(value: Any) -> float | None:
 
 
 def metric_value(metrics: dict[str, Any], metric_name: str, aggregate: str) -> float | None:
+    """Compute metric value.
+
+
+    Args:
+        metrics: metrics (dict[str, Any]) used by this operation.
+        metric_name: metric name (str) used by this operation.
+        aggregate: aggregate (str) used by this operation.
+
+    Returns:
+        float | None value produced by metric value.
+    """
     value = metrics.get(metric_name, {}).get(aggregate)
     if value is None:
         return None
@@ -493,18 +694,46 @@ def metric_value(metrics: dict[str, Any], metric_name: str, aggregate: str) -> f
 
 
 def bytes_to_gb(value: float | None) -> float | None:
+    """Compute bytes to GB.
+
+
+    Args:
+        value: value (float | None) used by this operation.
+
+    Returns:
+        float | None value produced by bytes to GB.
+    """
     if value is None:
         return None
     return round(value / BYTES_PER_GB, 6)
 
 
 def seconds_to_ms(value: float | None) -> float | None:
+    """Compute seconds to milliseconds.
+
+
+    Args:
+        value: value (float | None) used by this operation.
+
+    Returns:
+        float | None value produced by seconds to milliseconds.
+    """
     if value is None:
         return None
     return round(value * MS_PER_SECOND, 6)
 
 
 def summary_status(summary: dict[str, Any], *, min_coverage_ratio: float = 0.95) -> str:
+    """Compute summary status.
+
+
+    Args:
+        summary: summary (dict[str, Any]) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        str value produced by summary status.
+    """
     if (
         summary.get("missing_metrics")
         or summary.get("empty_metrics")
@@ -519,6 +748,16 @@ def summary_status(summary: dict[str, Any], *, min_coverage_ratio: float = 0.95)
 
 
 def duration_seconds(start: str | None, end: str | None) -> int | None:
+    """Compute duration seconds.
+
+
+    Args:
+        start: start (str | None) used by this operation.
+        end: end (str | None) used by this operation.
+
+    Returns:
+        int | None value produced by duration seconds.
+    """
     if not start or not end:
         return None
     start_dt = parse_timestamp(start)
@@ -529,6 +768,15 @@ def duration_seconds(start: str | None, end: str | None) -> int | None:
 
 
 def normalize_timestamp(value: Any) -> str | None:
+    """Normalize timestamp.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        str | None value produced by normalize timestamp.
+    """
     parsed = parse_timestamp(value)
     if parsed is None:
         return None
@@ -536,6 +784,18 @@ def normalize_timestamp(value: Any) -> str | None:
 
 
 def parse_timestamp(value: Any) -> datetime | None:
+    """Parse timestamp.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        datetime | None value produced by parse timestamp.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not isinstance(value, str) or not value.strip():
         return None
     normalized = value.strip().replace("Z", "+00:00")
@@ -548,13 +808,16 @@ def parse_timestamp(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
 def clean_required_value(value: Any) -> str | None:
+    """Compute clean required value.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        str | None value produced by clean required value.
+    """
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
@@ -562,6 +825,15 @@ def clean_required_value(value: Any) -> str | None:
 
 
 def clean_optional_value(value: Any) -> str | None:
+    """Compute clean optional value.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        str | None value produced by clean optional value.
+    """
     if value is None:
         return None
     if not isinstance(value, str):

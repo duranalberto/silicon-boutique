@@ -1,3 +1,5 @@
+"""Tests for test run acceptance matrix."""
+
 import importlib.util
 import json
 import sys
@@ -18,15 +20,35 @@ spec.loader.exec_module(run_acceptance_matrix)
 
 
 class FakeCompleted:
+    """Test double that records completed interactions.
+    """
     returncode = 0
 
 
 class AcceptanceMatrixTest(unittest.TestCase):
+    """Unit tests covering acceptance Matrix behavior.
+    """
     def test_local_mode_runs_local_acceptance_and_skips_clouds(self):
+        """Verify local mode runs local acceptance and skips clouds.
+
+
+        Returns:
+            Result produced by test local mode runs local acceptance and skips clouds.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
 
             def runner(command, **kwargs):
+                """Compute runner.
+
+
+                Args:
+                    command: command used by this operation.
+                    kwargs: kwargs used by this operation.
+
+                Returns:
+                    Result produced by runner.
+                """
                 del command, kwargs
                 write_artifacts(base / "local", "local-test", "local")
                 return FakeCompleted()
@@ -47,6 +69,12 @@ class AcceptanceMatrixTest(unittest.TestCase):
             )
 
     def test_stale_summary_run_id_fails_artifact_verification(self):
+        """Verify stale summary run ID fails artifact verification.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             gcp = base / "gcp"
@@ -63,6 +91,12 @@ class AcceptanceMatrixTest(unittest.TestCase):
             )
 
     def test_missing_teardown_status_fails_artifact_verification(self):
+        """Verify missing teardown status fails artifact verification.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             aws = base / "aws"
@@ -77,6 +111,12 @@ class AcceptanceMatrixTest(unittest.TestCase):
             self.assertIn("teardown-status.env", report["checks"]["aws_live_benchmark"]["errors"][0])
 
     def test_mixed_gcp_aws_artifacts_generate_comparison(self):
+        """Verify mixed GCP AWS artifacts generate comparison.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             gcp = base / "gcp"
@@ -106,6 +146,17 @@ class AcceptanceMatrixTest(unittest.TestCase):
 
 
 def run_matrix(base, *extra_args, runner=None):
+    """Run matrix.
+
+
+    Args:
+        base: base used by this operation.
+        extra_args: extra arguments used by this operation.
+        runner: runner used by this operation.
+
+    Returns:
+        Result produced by run matrix.
+    """
     args = run_acceptance_matrix.parse_args(
         [
             "--artifacts-dir",
@@ -123,6 +174,18 @@ def run_matrix(base, *extra_args, runner=None):
 
 
 def write_artifacts(path, run_id, provider, *, summary_run_id=None):
+    """Write artifacts.
+
+
+    Args:
+        path: path used by this operation.
+        run_id: run ID used by this operation.
+        provider: provider used by this operation.
+        summary_run_id: summary run ID used by this operation.
+
+    Returns:
+        None.
+    """
     path.mkdir(parents=True, exist_ok=True)
     summary_id = summary_run_id or run_id
     write_json(
@@ -173,6 +236,16 @@ def write_artifacts(path, run_id, provider, *, summary_run_id=None):
 
 
 def summary_payload(run_id, provider):
+    """Compute summary payload.
+
+
+    Args:
+        run_id: run ID used by this operation.
+        provider: provider used by this operation.
+
+    Returns:
+        Result produced by summary payload.
+    """
     cloud = {
         "local": ("local", "local", "local", "local", "local"),
         "gcp": ("gcp", "us-central1", "us-central1-a", "c3-standard-4", "c3"),
@@ -192,7 +265,7 @@ def summary_payload(run_id, provider):
         "benchmark_start": "2026-05-07T12:00:00Z",
         "cloud_provider": cloud[0],
         "cost_per_1m_requests_usd": 0.4,
-        "cpu_platform": None,
+        "cpu_platform": None if provider == "local" else "test-platform",
         "duration_seconds": 1200,
         "empty_metrics": [],
         "environment": cloud[0],
@@ -222,9 +295,9 @@ def summary_payload(run_id, provider):
         "pricing_model": pricing,
         "processor_family": cloud[4],
         "region": cloud[1],
-        "request_count_total": 1000,
+        "request_count_total": 120000,
         "request_failure_count": 1,
-        "request_success_count": 999,
+        "request_success_count": 119999,
         "run_id": run_id,
         "summary_status": "complete",
         "zone": cloud[2],
@@ -232,11 +305,30 @@ def summary_payload(run_id, provider):
 
 
 def write_json(path, payload):
+    """Write jSON.
+
+
+    Args:
+        path: path used by this operation.
+        payload: payload used by this operation.
+
+    Returns:
+        None.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def read_json(path):
+    """Read jSON.
+
+
+    Args:
+        path: path used by this operation.
+
+    Returns:
+        Result produced by read JSON.
+    """
     return json.loads(path.read_text(encoding="utf-8"))
 
 

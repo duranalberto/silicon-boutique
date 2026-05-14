@@ -5,11 +5,10 @@ SiliconBoutique is a local-first benchmarking workspace for running the Google O
 ## Start Here
 
 - [`docs/spec-driven-development.md`](docs/spec-driven-development.md): the project specification and long-term design intent.
-- [`docs/local-usage.md`](docs/local-usage.md): the recommended first-time local setup and usage guide.
+- [`docs/runbook.md`](docs/runbook.md): the single operator guide for setup, local runs, cloud dispatch, BigQuery, dashboards, acceptance evidence, and teardown.
 - [`docs/project-layout.md`](docs/project-layout.md): the current repository layout and intended folder structure.
 - [`docs/architecture.md`](docs/architecture.md): the component breakdown and data flow.
 - [`docs/roadmap.md`](docs/roadmap.md): the implementation sequence and dependency order.
-- [`docs/runbook.md`](docs/runbook.md): the local and cloud operating flow.
 - [`AGENTS.md`](AGENTS.md): operating notes for AI agents and collaborators.
 - [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json): local development environment.
 
@@ -27,15 +26,18 @@ SiliconBoutique is a local-first benchmarking workspace for running the Google O
 
 Open the repository in a devcontainer to get Terraform, kubectl, Helm, Python, Docker, and a local minikube-backed Kubernetes validation path. The devcontainer bootstrap checks the toolchain and brings up the `siliconboutique` profile automatically when Docker is reachable.
 
-Use the local Kubernetes validation path for development and test validation first, then use the guarded GCP or AWS workflows for live cloud benchmarks.
+Use [`docs/runbook.md`](docs/runbook.md) for the documented command flow. Run local validation first, then use the guarded GCP or AWS workflow-dispatch paths for live cloud benchmarks.
 
-## Supported Workflows
+## Run A Benchmark
 
-- Local smoke benchmark: `python3 automation/scripts/run_local_benchmark.py --test-duration 2m --min-duration-seconds 60`
-- Local acceptance demo: `python3 automation/scripts/run_acceptance_demo.py --mode local`
-- GCP live benchmark: dispatch `.github/workflows/benchmark.yml` after provisioning the BigQuery destination and confirming teardown expectations.
-- AWS live benchmark: dispatch `.github/workflows/benchmark-aws.yml` in a sandbox AWS account with `AWS_ROLE_TO_ASSUME` and BigQuery credentials configured.
-- Multi-cloud acceptance matrix: `python3 automation/scripts/run_acceptance_matrix.py --mode verify --gcp-artifacts <dir> --aws-artifacts <dir>`
-- MCP entrypoints: `PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --tools` for CLI validation and `silicon-boutique-mcp-stdio` for the stdio MCP server after installing package dependencies.
+The canonical benchmark operator guide is [`docs/runbook.md`](docs/runbook.md). Start there for setup, command selection, local and GCP execution, diagrams, BigQuery persistence, dashboard viewing, expected artifacts, teardown guidance, and troubleshooting.
 
-Implemented pieces include local, GCP, and AWS Terraform roots, Helm workload and monitoring charts, metric extraction and summary automation, GitHub Actions benchmark orchestration, strict Grafana dashboard API acceptance, BigQuery-backed history, comparison reports, a multi-cloud acceptance matrix, and production MCP adapters for GCP trigger, GitHub Actions status, and BigQuery history.
+Common entrypoints:
+
+- Local smoke: `python3 automation/scripts/run_benchmark_workflow.py --target local --profile smoke --bigquery-env-file credential.env`
+- GCP remote benchmark: `python3 automation/scripts/run_benchmark_workflow.py --target gcp --project-id "$project_id" --bigquery-env-file credential.env`
+- Results dashboard: `python3 automation/scripts/launch_metrics_dashboard.py --no-browser`
+
+MCP entrypoints remain available for integration validation: `PYTHONPATH=mcp-server/src python3 -m silicon_boutique_mcp --tools` and `silicon-boutique-mcp-stdio` after installing package dependencies.
+
+Implemented pieces include local, GCP, and AWS Terraform roots, Helm workload and monitoring charts, metric extraction and summary automation, GitHub Actions benchmark orchestration, strict Grafana dashboard API acceptance, BigQuery-backed history, comparison reports, a multi-cloud acceptance matrix, a unified workflow coordinator, and production MCP adapters for GCP trigger, GitHub Actions status, and BigQuery history.

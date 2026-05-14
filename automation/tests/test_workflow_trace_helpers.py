@@ -1,3 +1,5 @@
+"""Tests for test workflow trace helpers."""
+
 import sys
 import tempfile
 import unittest
@@ -13,7 +15,15 @@ import write_workflow_trace
 
 
 class WorkflowTraceHelpersTest(unittest.TestCase):
+    """Unit tests covering workflow Trace Helpers behavior.
+    """
     def test_build_trace_preserves_artifact_keys_and_env_values(self):
+        """Verify build trace preserves artifact keys and environment values.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             artifacts = Path(tmpdir)
             (artifacts / "benchmark-summary.json").write_text("{}", encoding="utf-8")
@@ -51,6 +61,12 @@ class WorkflowTraceHelpersTest(unittest.TestCase):
             self.assertEqual(trace["teardown"]["destroy_succeeded"], "pending")
 
     def test_render_acceptance_summary_matches_workflow_table(self):
+        """Verify render acceptance summary matches workflow table.
+
+
+        Returns:
+            None.
+        """
         markdown = render_acceptance_summary.render_summary(
             {
                 "status": "passed",

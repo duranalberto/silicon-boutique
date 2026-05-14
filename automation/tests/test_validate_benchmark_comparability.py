@@ -1,3 +1,5 @@
+"""Tests for test validate benchmark comparability."""
+
 import json
 import subprocess
 import sys
@@ -14,7 +16,19 @@ SCHEMA = REPO_ROOT / "automation" / "templates" / "benchmark-summary.schema.json
 
 
 class ValidateBenchmarkComparabilityTest(unittest.TestCase):
+    """Unit tests covering validate Benchmark Comparability behavior.
+    """
     def valid_summary(self, run_id="run-a", machine_type="minikube-a"):
+        """Compute valid summary.
+
+
+        Args:
+            run_id: run ID used by this operation.
+            machine_type: machine type used by this operation.
+
+        Returns:
+            Result produced by valid summary.
+        """
         return {
             "architecture": "x86_64",
             "avg_cpu_throttling_ratio": 0.018,
@@ -67,6 +81,16 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         }
 
     def run_validator(self, rows, *extra_args):
+        """Run validator.
+
+
+        Args:
+            rows: rows used by this operation.
+            extra_args: extra arguments used by this operation.
+
+        Returns:
+            Result produced by run validator.
+        """
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
         base = Path(tmpdir.name)
@@ -100,6 +124,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         return result, payload
 
     def test_two_valid_fixture_summaries_pass_comparability(self):
+        """Verify two valid fixture summaries pass comparability.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_validator(
             [
                 self.valid_summary("run-a", "minikube-a"),
@@ -114,6 +144,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["rejected_runs"], [])
 
     def test_single_valid_summary_passes_summary_mode(self):
+        """Verify single valid summary passes summary mode.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_validator(
             [self.valid_summary()],
             "--mode",
@@ -130,6 +166,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["rejected_runs"], [])
 
     def test_run_id_selection_passes_summary_mode_with_invalid_historical_rows(self):
+        """Verify run ID selection passes summary mode with invalid historical rows.
+
+
+        Returns:
+            None.
+        """
         short_row = self.valid_summary("short-run")
         short_row["duration_seconds"] = 60
         partial_row = self.valid_summary("partial-run")
@@ -153,6 +195,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["rejected_runs"], [])
 
     def test_run_id_selection_fails_when_missing(self):
+        """Verify run ID selection fails when missing.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_validator(
             [self.valid_summary("run-a")],
             "--run-id",
@@ -170,6 +218,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_run_id_selection_fails_when_duplicate(self):
+        """Verify run ID selection fails when duplicate.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_validator(
             [self.valid_summary("run-a"), self.valid_summary("run-a")],
             "--run-id",
@@ -187,6 +241,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_single_valid_summary_fails_comparability_mode(self):
+        """Verify single valid summary fails comparability mode.
+
+
+        Returns:
+            None.
+        """
         result, report = self.run_validator(
             [self.valid_summary()],
             "--mode",
@@ -199,6 +259,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["comparability_validation_status"], "fail")
 
     def test_single_invalid_summary_fails_summary_mode(self):
+        """Verify single invalid summary fails summary mode.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["summary_status"] = "partial"
 
@@ -211,6 +277,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("- run-a: summary_status_not_complete", result.stderr)
 
     def test_short_duration_fails_quality_bar(self):
+        """Verify short duration fails quality bar.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["duration_seconds"] = 1199
 
@@ -221,6 +293,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("duration_seconds_below_min:1199<1200", report["rejected_runs"][0]["reasons"])
 
     def test_low_coverage_fails_quality_bar(self):
+        """Verify low coverage fails quality bar.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["metrics_coverage_ratio"] = 0.94
 
@@ -233,6 +311,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_partial_summary_status_fails(self):
+        """Verify partial summary status fails.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["summary_status"] = "partial"
 
@@ -242,6 +326,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("summary_status_not_complete", report["rejected_runs"][0]["reasons"])
 
     def test_missing_baseline_labels_fail(self):
+        """Verify missing baseline labels fail.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["machine_type"] = ""
 
@@ -254,6 +344,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_missing_normalized_metadata_fails(self):
+        """Verify missing normalized metadata fails.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["region"] = ""
         row["zone"] = ""
@@ -268,6 +364,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_invalid_node_count_fails(self):
+        """Verify invalid node count fails.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["node_count"] = 0
 
@@ -277,6 +379,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("invalid_node_count", report["rejected_runs"][0]["reasons"])
 
     def test_invalid_pricing_model_fails(self):
+        """Verify invalid pricing model fails.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["pricing_model"] = "preemptible"
 
@@ -286,6 +394,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("invalid_pricing_model", report["rejected_runs"][0]["reasons"])
 
     def test_nullable_cpu_platform_is_accepted(self):
+        """Verify nullable CPU platform is accepted.
+
+
+        Returns:
+            None.
+        """
         row_a = self.valid_summary("run-a")
         row_b = self.valid_summary("run-b")
         row_a["cpu_platform"] = None
@@ -297,6 +411,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["comparability_status"], "pass")
 
     def test_schema_extra_field_fails_as_drift(self):
+        """Verify schema extra field fails as drift.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["unexpected"] = "drift"
 
@@ -306,6 +426,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertIn("schema_extra_fields:unexpected", report["rejected_runs"][0]["reasons"])
 
     def test_schema_missing_field_fails_as_drift(self):
+        """Verify schema missing field fails as drift.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         del row["frontend_latency_p99_ms"]
 
@@ -318,6 +444,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         )
 
     def test_nullable_future_fields_are_accepted(self):
+        """Verify nullable future fields are accepted.
+
+
+        Returns:
+            None.
+        """
         row_a = self.valid_summary("run-a")
         row_b = self.valid_summary("run-b")
         row_a["benchmark_compute_cost_usd"] = None
@@ -333,6 +465,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["comparability_status"], "pass")
 
     def test_non_strict_mode_reports_fail_but_exits_zero(self):
+        """Verify non strict mode reports fail but exits zero.
+
+
+        Returns:
+            None.
+        """
         row = self.valid_summary()
         row["duration_seconds"] = 60
 
@@ -342,6 +480,12 @@ class ValidateBenchmarkComparabilityTest(unittest.TestCase):
         self.assertEqual(report["comparability_status"], "fail")
 
     def test_unscoped_comparability_still_fails_on_invalid_historical_rows(self):
+        """Verify unscoped comparability still fails on invalid historical rows.
+
+
+        Returns:
+            None.
+        """
         short_row = self.valid_summary("short-run")
         short_row["duration_seconds"] = 60
 

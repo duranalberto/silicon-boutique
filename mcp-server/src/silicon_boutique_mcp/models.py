@@ -117,13 +117,6 @@ class BenchmarkSummaryReference:
 
 
 @dataclass(frozen=True, slots=True)
-class GetBenchmarkStatusRequest:
-    """Input contract for the benchmark status operation."""
-
-    run_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class GetBenchmarkStatusResponse:
     """Output contract for the benchmark status operation."""
 
@@ -132,7 +125,12 @@ class GetBenchmarkStatusResponse:
     trace: WorkflowTrace
 
     def to_dict(self) -> dict[str, Any]:
-        """Render the response as JSON-serializable data."""
+        """Compute to dict.
+
+
+        Returns:
+            dict[str, Any] value produced by to dict.
+        """
         return asdict(self)
 
 
@@ -154,7 +152,12 @@ class HistoricalMetricsResponse:
     results: tuple[BenchmarkSummaryReference, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
-        """Render the response as JSON-serializable data."""
+        """Compute to dict.
+
+
+        Returns:
+            dict[str, Any] value produced by to dict.
+        """
         return asdict(self)
 
 
@@ -178,7 +181,12 @@ class ToolDefinition:
     readiness: str = "contract_ready"
 
     def to_dict(self) -> dict[str, Any]:
-        """Render the tool definition as JSON-serializable data."""
+        """Compute to dict.
+
+
+        Returns:
+            dict[str, Any] value produced by to dict.
+        """
         return asdict(self)
 
 
@@ -191,5 +199,10 @@ class BoundaryManifest:
     capabilities: tuple[BoundaryCapability, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
-        """Render the manifest as JSON-serializable data."""
+        """Compute to dict.
+
+
+        Returns:
+            dict[str, Any] value produced by to dict.
+        """
         return asdict(self)

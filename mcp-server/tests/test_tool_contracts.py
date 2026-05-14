@@ -1,3 +1,5 @@
+"""Tests for test tool contracts."""
+
 import json
 import os
 import subprocess
@@ -30,10 +32,27 @@ from silicon_boutique_mcp.tools import (  # noqa: E402
 
 
 class ToolContractTest(unittest.TestCase):
+    """Unit tests covering tool Contract behavior.
+    """
     def env(self):
+        """Compute environment.
+
+
+        Returns:
+            Result produced by environment.
+        """
         return {**os.environ, "PYTHONPATH": str(MCP_SRC)}
 
     def write_trace_fixture(self, tmpdir):
+        """Write trace fixture.
+
+
+        Args:
+            tmpdir: tmpdir used by this operation.
+
+        Returns:
+            Result produced by write trace fixture.
+        """
         path = Path(tmpdir) / "workflow-traces.json"
         payload = {
             "runs": [
@@ -94,6 +113,16 @@ class ToolContractTest(unittest.TestCase):
         return path
 
     def write_summary_store(self, tmpdir, rows):
+        """Write summary store.
+
+
+        Args:
+            tmpdir: tmpdir used by this operation.
+            rows: rows used by this operation.
+
+        Returns:
+            Result produced by write summary store.
+        """
         path = Path(tmpdir) / "benchmark-summaries.ndjson"
         path.write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
@@ -102,6 +131,12 @@ class ToolContractTest(unittest.TestCase):
         return path
 
     def summary_rows(self):
+        """Compute summary rows.
+
+
+        Returns:
+            Result produced by summary rows.
+        """
         return [
             {
                 "run_id": "run-a",
@@ -151,6 +186,15 @@ class ToolContractTest(unittest.TestCase):
         ]
 
     def benchmark_request(self, **overrides):
+        """Compute benchmark request.
+
+
+        Args:
+            overrides: overrides used by this operation.
+
+        Returns:
+            Result produced by benchmark request.
+        """
         values = {
             "cloud_provider": "gcp",
             "project_id": "test-project",
@@ -169,6 +213,12 @@ class ToolContractTest(unittest.TestCase):
         return BenchmarkRunRequest(**values)
 
     def test_tool_registry_lists_p5_2_operations(self):
+        """Verify tool registry lists p5 2 operations.
+
+
+        Returns:
+            None.
+        """
         tool_names = {tool["name"] for tool in tool_definitions_as_dicts()}
 
         self.assertEqual(
@@ -181,6 +231,12 @@ class ToolContractTest(unittest.TestCase):
         )
 
     def test_trigger_benchmark_run_validates_and_delegates(self):
+        """Verify trigger benchmark run validates and delegates.
+
+
+        Returns:
+            None.
+        """
         controller = RecordingRunController()
 
         identity = trigger_benchmark_run(self.benchmark_request(), controller)
@@ -189,6 +245,12 @@ class ToolContractTest(unittest.TestCase):
         self.assertEqual(controller.requests[0].machine_type, "c3-standard-4")
 
     def test_invalid_trigger_requests_fail_validation(self):
+        """Verify invalid trigger requests fail validation.
+
+
+        Returns:
+            None.
+        """
         invalid_requests = [
             self.benchmark_request(cloud_provider="aws"),
             self.benchmark_request(project_id="   "),
@@ -206,6 +268,12 @@ class ToolContractTest(unittest.TestCase):
                     trigger_benchmark_run(request, RecordingRunController())
 
     def test_status_lookup_returns_fixture_status_cases(self):
+        """Verify status lookup returns fixture status cases.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = WorkflowTraceFixtureAdapter(self.write_trace_fixture(tmpdir))
 
@@ -222,6 +290,12 @@ class ToolContractTest(unittest.TestCase):
                 self.assertEqual(response.run_id, run_id)
 
     def test_blank_run_id_fails_validation(self):
+        """Verify blank run ID fails validation.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = WorkflowTraceFixtureAdapter(self.write_trace_fixture(tmpdir))
 
@@ -229,6 +303,12 @@ class ToolContractTest(unittest.TestCase):
                 get_benchmark_status("   ", adapter)
 
     def test_history_query_filters_by_machine_metadata(self):
+        """Verify history query filters by machine metadata.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             store = SummaryStoreFixtureAdapter(
                 self.write_summary_store(tmpdir, self.summary_rows())
@@ -254,6 +334,12 @@ class ToolContractTest(unittest.TestCase):
             self.assertEqual(response.results[0].missing_metrics, ("cpu_usage_cores",))
 
     def test_empty_history_returns_valid_empty_response(self):
+        """Verify empty history returns valid empty response.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             store = SummaryStoreFixtureAdapter(self.write_summary_store(tmpdir, []))
 
@@ -263,6 +349,12 @@ class ToolContractTest(unittest.TestCase):
             self.assertEqual(response.query.limit, 10)
 
     def test_invalid_history_query_fails_validation(self):
+        """Verify invalid history query fails validation.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             store = SummaryStoreFixtureAdapter(
                 self.write_summary_store(tmpdir, self.summary_rows())
@@ -278,6 +370,12 @@ class ToolContractTest(unittest.TestCase):
                 )
 
     def test_cli_tools_status_and_history_emit_json(self):
+        """Verify cLI tools status and history emit JSON.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             trace_fixture = self.write_trace_fixture(tmpdir)
             summary_store = self.write_summary_store(tmpdir, self.summary_rows())
@@ -345,6 +443,12 @@ class ToolContractTest(unittest.TestCase):
             self.assertEqual(history_payload["results"][0]["run_id"], "run-a")
 
     def test_cli_history_uses_bigquery_when_summary_store_is_omitted(self):
+        """Verify cLI history uses BigQuery when summary store is omitted.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_bq = Path(tmpdir) / "fake-bq.py"
             rows = [self.summary_rows()[0]]
@@ -385,10 +489,27 @@ class ToolContractTest(unittest.TestCase):
 
 
 class RecordingRunController:
+    """Unit tests covering recording Run Controller behavior.
+    """
     def __init__(self):
+        """Initialize the object with the provided configuration.
+
+
+        Returns:
+            None.
+        """
         self.requests = []
 
     def trigger_benchmark_run(self, request):
+        """Trigger benchmark run.
+
+
+        Args:
+            request: request used by this operation.
+
+        Returns:
+            Result produced by trigger benchmark run.
+        """
         self.requests.append(request)
         return RunIdentity(
             run_id="gha-123-1",
@@ -397,6 +518,18 @@ class RecordingRunController:
         )
 
     def get_benchmark_status(self, run_id):
+        """Return benchmark status.
+
+
+        Args:
+            run_id: run ID used by this operation.
+
+        Returns:
+            None.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         raise NotImplementedError
 
 

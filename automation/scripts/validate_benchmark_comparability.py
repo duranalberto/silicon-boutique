@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Validate SiliconBoutique benchmark summary comparability."""
+"""Command-line workflow for validate benchmark comparability in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,13 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_SRC = REPO_ROOT / "mcp-server" / "src"
+if str(SHARED_SRC) not in sys.path:
+    sys.path.insert(0, str(SHARED_SRC))
+
+from silicon_boutique_shared.automation import write_json
 
 
 BASELINE_LABEL_FIELDS = (
@@ -63,6 +74,15 @@ class ComparabilityError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Validate benchmark summary quality and comparability."
     )
@@ -101,6 +121,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args()
     try:
         schema = load_json(args.schema, "schema")
@@ -147,6 +173,23 @@ def build_report(
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> dict[str, Any]:
+    """Build report.
+
+
+    Args:
+        summary_store: summary store (Path) used by this operation.
+        schema_path: schema path (Path) used by this operation.
+        schema: schema (dict[str, Any]) used by this operation.
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        source_total_rows: source total rows (int) used by this operation.
+        selected_run_id: selected run ID (str | None) used by this operation.
+        mode: mode (str) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build report.
+    """
     schema_fields = schema_field_set(schema)
     comparable_run_ids: list[str] = []
     rejected_runs: list[dict[str, Any]] = []
@@ -219,6 +262,19 @@ def build_report(
 
 
 def select_rows(rows: list[dict[str, Any]], run_id: str | None) -> list[dict[str, Any]]:
+    """Select rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        run_id: run ID (str | None) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by select rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if run_id:
         selected = [row for row in rows if row.get("run_id") == run_id]
         if len(selected) != 1:
@@ -237,6 +293,19 @@ def rejection_reasons(
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> list[str]:
+    """Compute rejection reasons.
+
+
+    Args:
+        row: row (dict[str, Any]) used by this operation.
+        row_index: row index (int) used by this operation.
+        schema_fields: schema fields (set[str]) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        list[str] value produced by rejection reasons.
+    """
     reasons: list[str] = []
     row_fields = set(row)
     extra_fields = sorted(row_fields - schema_fields)
@@ -311,6 +380,18 @@ def comparability_status(
     rejected_count: int,
     schema_drift_found: bool,
 ) -> str:
+    """Compute comparability status.
+
+
+    Args:
+        total_rows: total rows (int) used by this operation.
+        comparable_count: comparable count (int) used by this operation.
+        rejected_count: rejected count (int) used by this operation.
+        schema_drift_found: schema drift found (bool) used by this operation.
+
+    Returns:
+        str value produced by comparability status.
+    """
     if schema_drift_found or rejected_count or comparable_count < 2:
         return "fail"
     if total_rows == 0:
@@ -326,12 +407,35 @@ def summary_validation_status(
     rejected_count: int,
     schema_drift_found: bool,
 ) -> str:
+    """Compute summary validation status.
+
+
+    Args:
+        total_rows: total rows (int) used by this operation.
+        rejected_count: rejected count (int) used by this operation.
+        schema_drift_found: schema drift found (bool) used by this operation.
+
+    Returns:
+        str value produced by summary validation status.
+    """
     if total_rows == 0 or rejected_count or schema_drift_found:
         return "fail"
     return "pass"
 
 
 def schema_field_set(schema: dict[str, Any]) -> set[str]:
+    """Compute schema field set.
+
+
+    Args:
+        schema: schema (dict[str, Any]) used by this operation.
+
+    Returns:
+        set[str] value produced by schema field set.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     properties = schema.get("properties")
     if not isinstance(properties, dict) or not properties:
         raise ComparabilityError("schema does not define object properties")
@@ -339,6 +443,18 @@ def schema_field_set(schema: dict[str, Any]) -> set[str]:
 
 
 def read_summary_store(path: Path) -> list[dict[str, Any]]:
+    """Read summary store.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by read summary store.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         raise ComparabilityError(f"summary store does not exist: {path}")
     rows: list[dict[str, Any]] = []
@@ -360,6 +476,19 @@ def read_summary_store(path: Path) -> list[dict[str, Any]]:
 
 
 def load_json(path: Path, label: str) -> dict[str, Any]:
+    """Load jSON.
+
+
+    Args:
+        path: path (Path) used by this operation.
+        label: label (str) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by load JSON.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -371,16 +500,29 @@ def load_json(path: Path, label: str) -> dict[str, Any]:
     return payload
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
 def non_empty_string(value: Any) -> bool:
+    """Compute non empty string.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        bool value produced by non empty string.
+    """
     return isinstance(value, str) and bool(value.strip())
 
 
 def numeric_value(value: Any) -> float | None:
+    """Compute numeric value.
+
+
+    Args:
+        value: value (Any) used by this operation.
+
+    Returns:
+        float | None value produced by numeric value.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -389,6 +531,15 @@ def numeric_value(value: Any) -> float | None:
 
 
 def strict_failure_detail(report: dict[str, Any]) -> str:
+    """Compute strict failure detail.
+
+
+    Args:
+        report: report (dict[str, Any]) used by this operation.
+
+    Returns:
+        str value produced by strict failure detail.
+    """
     rejected_runs = report.get("rejected_runs")
     if not isinstance(rejected_runs, list) or not rejected_runs:
         return ""

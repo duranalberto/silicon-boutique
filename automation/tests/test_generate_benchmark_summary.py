@@ -1,3 +1,5 @@
+"""Tests for test generate benchmark summary."""
+
 import json
 import subprocess
 import sys
@@ -16,7 +18,15 @@ LOADGENERATOR_FIXTURE = (
 
 
 class GenerateBenchmarkSummaryTest(unittest.TestCase):
+    """Unit tests covering generate Benchmark Summary behavior.
+    """
     def make_metrics_payload(self):
+        """Compute make metrics payload.
+
+
+        Returns:
+            Result produced by make metrics payload.
+        """
         result = subprocess.run(
             [
                 sys.executable,
@@ -43,6 +53,17 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
         return json.loads(result.stdout)
 
     def run_summary(self, tmpdir, metrics_payload, *extra_args):
+        """Run summary.
+
+
+        Args:
+            tmpdir: tmpdir used by this operation.
+            metrics_payload: metrics payload used by this operation.
+            extra_args: extra arguments used by this operation.
+
+        Returns:
+            Result produced by run summary.
+        """
         metrics_input = Path(tmpdir) / "prometheus-metrics.json"
         summary_output = Path(tmpdir) / "benchmark-summary.json"
         summary_store = Path(tmpdir) / "benchmark-summaries.ndjson"
@@ -103,6 +124,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
         return result, summary_output, summary_store
 
     def test_generates_deterministic_summary_and_store_row(self):
+        """Verify generates deterministic summary and store row.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             result, summary_output, summary_store = self.run_summary(
                 tmpdir,
@@ -144,6 +171,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIsNone(summary["cost_per_1m_requests_usd"])
 
     def test_priced_run_calculates_cost_per_million_requests(self):
+        """Verify priced run calculates cost per million requests.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             pricing = Path(tmpdir) / "pricing.json"
             pricing.write_text(
@@ -200,6 +233,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertAlmostEqual(summary["cost_per_1m_requests_usd"], 3.38983051)
 
     def test_duplicate_run_id_fails_by_default(self):
+        """Verify duplicate run ID fails by default.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             first, _, _ = self.run_summary(tmpdir, metrics_payload, "--strict")
@@ -210,6 +249,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("already contains run_id", second.stderr)
 
     def test_replace_updates_existing_store_row(self):
+        """Verify replace updates existing store row.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             first, _, summary_store = self.run_summary(tmpdir, metrics_payload, "--strict")
@@ -234,6 +279,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertAlmostEqual(summary["avg_cpu_usage_cores"], 3.25)
 
     def test_strict_mode_fails_on_partial_metric_quality(self):
+        """Verify strict mode fails on partial metric quality.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["quality"]["missing_series"] = ["cpu_usage_cores"]
@@ -244,6 +295,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("required metric quality checks failed", result.stderr)
 
     def test_non_strict_mode_emits_partial_summary(self):
+        """Verify non strict mode emits partial summary.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["quality"]["empty_series"] = ["frontend_probe_latency_seconds"]
@@ -255,6 +312,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["summary_status"], "partial")
 
     def test_non_strict_mode_marks_missing_derived_fields_partial(self):
+        """Verify non strict mode marks missing derived fields partial.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["metrics"]["frontend_probe_latency_seconds"]["p99"] = None
@@ -267,6 +330,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIsNone(summary["frontend_latency_p99_ms"])
 
     def test_coverage_above_minimum_is_complete(self):
+        """Verify coverage above minimum is complete.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["quality"]["coverage_ratio"] = 0.99
@@ -284,6 +353,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["summary_status"], "complete")
 
     def test_coverage_below_minimum_is_partial(self):
+        """Verify coverage below minimum is partial.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["quality"]["coverage_ratio"] = 0.94
@@ -300,6 +375,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["summary_status"], "partial")
 
     def test_invalid_min_coverage_ratio_fails_argument_validation(self):
+        """Verify invalid min coverage ratio fails argument validation.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             result, _, _ = self.run_summary(
                 tmpdir,
@@ -312,6 +393,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("--min-coverage-ratio must be between 0 and 1", result.stderr)
 
     def test_strict_mode_fails_when_cpu_utilization_is_missing(self):
+        """Verify strict mode fails when CPU utilization is missing.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["metrics"]["cpu_utilization_pct"]["avg"] = None
@@ -322,6 +409,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("avg_cpu_utilization_pct", result.stderr)
 
     def test_strict_mode_fails_when_cpu_utilization_is_impossible(self):
+        """Verify strict mode fails when CPU utilization is impossible.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             metrics_payload = self.make_metrics_payload()
             metrics_payload["metrics"]["cpu_utilization_pct"]["max"] = 150.0
@@ -332,6 +425,12 @@ class GenerateBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("CPU utilization fields are outside the expected range", result.stderr)
 
     def test_strict_priced_run_fails_when_pricing_is_missing(self):
+        """Verify strict priced run fails when pricing is missing.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             pricing = Path(tmpdir) / "pricing.json"
             pricing.write_text(json.dumps({"prices": []}), encoding="utf-8")

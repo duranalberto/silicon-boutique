@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Load canonical SiliconBoutique benchmark summaries into BigQuery."""
+"""Command-line workflow for load benchmark summary to BigQuery in the benchmark automation pipeline.
+
+
+The module exposes a CLI entrypoint plus focused helper functions so tests can exercise the workflow without running external infrastructure.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +35,17 @@ class BigQueryLoadError(RuntimeError):
         stage: str = "validation",
         diagnostics: dict[str, Any] | None = None,
     ):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            message: message (str) used by this operation.
+            stage: stage (str) used by this operation.
+            diagnostics: diagnostics (dict[str, Any] | None) used by this operation.
+
+        Returns:
+            None.
+        """
         super().__init__(message)
         self.stage = stage
         self.diagnostics = diagnostics or {}
@@ -42,8 +57,17 @@ PREVIEW_LIMIT = 600
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
-        description="Load BenchmarkSummary NDJSON rows into BigQuery."
+        description="Load BenchmarkSummary NDJSON rows into bigquery."
     )
     parser.add_argument("--summary-store", type=Path)
     parser.add_argument("--project-id", required=True)
@@ -86,6 +110,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     args = parse_args()
     report: dict[str, Any] = base_report(args)
     try:
@@ -176,13 +209,24 @@ def main() -> int:
 
 
 def base_report(args: argparse.Namespace) -> dict[str, Any]:
+    """Compute base report.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by base report.
+    """
     return {
         "status": "pending",
         "project_id": args.project_id,
         "dataset_id": args.dataset_id,
         "table_id": args.table_id,
         "location": args.location,
-        "summary_table": table_sql_name(args.project_id, args.dataset_id, args.table_id),
+        "summary_table": bq_helpers.table_sql_name(
+            args.project_id, args.dataset_id, args.table_id
+        ),
         "summary_store": str(args.summary_store),
         "schema": str(args.schema),
         "duplicate_policy": args.duplicate_policy,
@@ -199,6 +243,18 @@ def base_report(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def read_summary_rows(path: Path) -> list[dict[str, Any]]:
+    """Read summary rows.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by read summary rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if not path.exists():
         raise BigQueryLoadError(f"summary store does not exist: {path}")
     rows: list[dict[str, Any]] = []
@@ -227,6 +283,19 @@ def read_summary_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def select_rows(rows: list[dict[str, Any]], run_id: str | None) -> list[dict[str, Any]]:
+    """Select rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        run_id: run ID (str | None) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by select rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     if run_id:
         selected = [row for row in rows if row.get("run_id") == run_id]
         if len(selected) != 1:
@@ -242,6 +311,18 @@ def select_rows(rows: list[dict[str, Any]], run_id: str | None) -> list[dict[str
 
 
 def load_bigquery_schema(path: Path) -> list[dict[str, Any]]:
+    """Load BigQuery schema.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by load BigQuery schema.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         schema = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -259,6 +340,21 @@ def load_bigquery_schema(path: Path) -> list[dict[str, Any]]:
 def validate_destination(
     project_id: str, dataset_id: str, table_id: str, location: str
 ) -> None:
+    """Validate destination.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         bq_helpers.validate_destination(project_id, dataset_id, table_id, location)
     except bq_helpers.BigQueryHelperError as exc:
@@ -273,13 +369,29 @@ def validate_table_schema(
     expected_schema: list[dict[str, Any]],
     runner: Runner,
 ) -> None:
+    """Validate table schema.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        expected_schema: expected schema (list[dict[str, Any]]) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     result = runner(
         bq_helpers.show_table_command(project_id, dataset_id, table_id)
     )
     if result.returncode != 0:
         raise BigQueryLoadError(
             "failed to inspect BigQuery table "
-            f"{table_sql_name(project_id, dataset_id, table_id)}",
+            f"{bq_helpers.table_sql_name(project_id, dataset_id, table_id)}",
             stage="bq_show_schema",
             diagnostics=command_diagnostics(result),
         )
@@ -308,9 +420,25 @@ def validate_query_access(
     location: str,
     runner: Runner,
 ) -> None:
+    """Validate query access.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     query = (
         "SELECT run_id FROM "
-        f"`{table_sql_name(project_id, dataset_id, table_id)}` "
+        f"`{bq_helpers.table_sql_name(project_id, dataset_id, table_id)}` "
         "WHERE FALSE LIMIT 0"
     )
     result = runner(bq_helpers.query_command(project_id, location, query))
@@ -332,10 +460,27 @@ def existing_run_ids(
     run_ids: list[str],
     runner: Runner,
 ) -> set[str]:
-    run_id_literals = ", ".join(sql_string(run_id) for run_id in run_ids)
+    """Compute existing run IDs.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+        run_ids: run IDs (list[str]) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        set[str] value produced by existing run IDs.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
+    run_id_literals = ", ".join(bq_helpers.sql_string(run_id) for run_id in run_ids)
     query = (
         "SELECT run_id FROM "
-        f"`{table_sql_name(project_id, dataset_id, table_id)}` "
+        f"`{bq_helpers.table_sql_name(project_id, dataset_id, table_id)}` "
         f"WHERE run_id IN ({run_id_literals})"
     )
     result = runner(
@@ -365,6 +510,24 @@ def load_rows(
     schema: Path,
     runner: Runner,
 ) -> None:
+    """Load rows.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        table_id: table ID (str) used by this operation.
+        location: location (str) used by this operation.
+        schema: schema (Path) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".ndjson") as handle:
         for row in rows:
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
@@ -396,6 +559,23 @@ def preflight_write_probe(
     run_id: str | None,
     runner: Runner,
 ) -> str:
+    """Compute preflight write probe.
+
+
+    Args:
+        project_id: project ID (str) used by this operation.
+        dataset_id: dataset ID (str) used by this operation.
+        location: location (str) used by this operation.
+        schema: schema (Path) used by this operation.
+        run_id: run ID (str | None) used by this operation.
+        runner: runner (Runner) used by this operation.
+
+    Returns:
+        str value produced by preflight write probe.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     scratch_table_id = preflight_scratch_table_id(run_id)
     probe_row = preflight_probe_row(run_id)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".ndjson") as handle:
@@ -437,6 +617,15 @@ def preflight_write_probe(
 
 
 def preflight_scratch_table_id(run_id: str | None) -> str:
+    """Compute preflight scratch table ID.
+
+
+    Args:
+        run_id: run ID (str | None) used by this operation.
+
+    Returns:
+        str value produced by preflight scratch table ID.
+    """
     suffix = re.sub(r"[^A-Za-z0-9_]+", "_", (run_id or "manual").strip()).strip("_")
     if not suffix:
         suffix = "manual"
@@ -444,6 +633,15 @@ def preflight_scratch_table_id(run_id: str | None) -> str:
 
 
 def preflight_probe_row(run_id: str | None) -> dict[str, Any]:
+    """Compute preflight probe row.
+
+
+    Args:
+        run_id: run ID (str | None) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by preflight probe row.
+    """
     probe_run_id = run_id or "manual"
     timestamp = "2026-01-01T00:00:00Z"
     return {
@@ -474,6 +672,20 @@ def parse_bq_json_object(
     stage: str,
     label: str,
 ) -> dict[str, Any]:
+    """Parse bigQuery JSON object.
+
+
+    Args:
+        result: result (CommandResult) used by this operation.
+        stage: stage (str) used by this operation.
+        label: label (str) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by parse BigQuery JSON object.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         payload = json.loads(bq_json_stdout(result.stdout, fallback="{}"))
     except json.JSONDecodeError as exc:
@@ -497,6 +709,20 @@ def parse_bq_json_array(
     stage: str,
     label: str,
 ) -> list[dict[str, Any]]:
+    """Parse bigQuery JSON array.
+
+
+    Args:
+        result: result (CommandResult) used by this operation.
+        stage: stage (str) used by this operation.
+        label: label (str) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by parse BigQuery JSON array.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return bq_helpers.parse_bq_json_array(
             bq_json_stdout(result.stdout, fallback="[]"),
@@ -511,6 +737,15 @@ def parse_bq_json_array(
 
 
 def command_diagnostics(result: CommandResult) -> dict[str, Any]:
+    """Compute command diagnostics.
+
+
+    Args:
+        result: result (CommandResult) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by command diagnostics.
+    """
     return {
         "returncode": result.returncode,
         "stdout_preview": preview_text(result.stdout),
@@ -519,6 +754,15 @@ def command_diagnostics(result: CommandResult) -> dict[str, Any]:
 
 
 def format_load_error(exc: BigQueryLoadError) -> str:
+    """Format load error.
+
+
+    Args:
+        exc: exc (BigQueryLoadError) used by this operation.
+
+    Returns:
+        str value produced by format load error.
+    """
     lines = [str(exc)]
     if exc.stage:
         lines.append(f"stage: {exc.stage}")
@@ -532,6 +776,16 @@ def format_load_error(exc: BigQueryLoadError) -> str:
 
 
 def bq_json_stdout(value: str, *, fallback: str) -> str:
+    """Compute bigQuery JSON standard output.
+
+
+    Args:
+        value: value (str) used by this operation.
+        fallback: fallback (str) used by this operation.
+
+    Returns:
+        str value produced by bigQuery JSON standard output.
+    """
     text = (value or "").strip()
     if not text:
         return fallback
@@ -549,11 +803,29 @@ def bq_json_stdout(value: str, *, fallback: str) -> str:
 
 
 def is_ignorable_bq_stdout_line(value: str) -> bool:
+    """Compute is ignorable BigQuery standard output line.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        bool value produced by is ignorable BigQuery standard output line.
+    """
     stripped = value.strip()
     return not stripped or stripped.startswith(("WARNING:", "WARN:", "INFO:"))
 
 
 def preview_text(value: str) -> str:
+    """Compute preview text.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by preview text.
+    """
     text = redact_diagnostic_text(value or "").strip()
     if len(text) <= PREVIEW_LIMIT:
         return text
@@ -561,6 +833,15 @@ def preview_text(value: str) -> str:
 
 
 def redact_diagnostic_text(value: str) -> str:
+    """Compute redact diagnostic text.
+
+
+    Args:
+        value: value (str) used by this operation.
+
+    Returns:
+        str value produced by redact diagnostic text.
+    """
     patterns = [
         (r"(?i)(authorization:\s*)(bearer|basic)\s+\S+", r"\1<redacted>"),
         (r"(?i)((?:token|secret|password|credential)[A-Za-z0-9_ -]*[=:]\s*)\S+", r"\1<redacted>"),
@@ -573,6 +854,15 @@ def redact_diagnostic_text(value: str) -> str:
 
 
 def schema_signature(fields: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """Compute schema signature.
+
+
+    Args:
+        fields: fields (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        list[tuple[str, str, str]] value produced by schema signature.
+    """
     return [
         (
             str(field.get("name", "")),
@@ -583,19 +873,19 @@ def schema_signature(fields: list[dict[str, Any]]) -> list[tuple[str, str, str]]
     ]
 
 
-def table_ref(project_id: str, dataset_id: str, table_id: str) -> str:
-    return bq_helpers.table_ref(project_id, dataset_id, table_id)
-
-
-def table_sql_name(project_id: str, dataset_id: str, table_id: str) -> str:
-    return bq_helpers.table_sql_name(project_id, dataset_id, table_id)
-
-
-def sql_string(value: str) -> str:
-    return bq_helpers.sql_string(value)
-
-
 def run_bq(command: list[str]) -> CommandResult:
+    """Run bigQuery.
+
+
+    Args:
+        command: command (list[str]) used by this operation.
+
+    Returns:
+        CommandResult value produced by run bigquery.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         return bq_helpers.run_bq(command)
     except bq_helpers.BigQueryHelperError as exc:

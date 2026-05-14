@@ -51,7 +51,12 @@ PLANNED_CAPABILITIES = (
 
 
 def build_boundary_manifest() -> BoundaryManifest:
-    """Return the static boundary manifest."""
+    """Build boundary manifest.
+
+
+    Returns:
+        BoundaryManifest value produced by build boundary manifest.
+    """
     return BoundaryManifest(
         service_name="silicon-boutique-mcp",
         boundary_version=BOUNDARY_VERSION,
@@ -60,6 +65,18 @@ def build_boundary_manifest() -> BoundaryManifest:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Args:
+        argv: argv (Sequence[str] | None) used by this operation.
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         prog="silicon-boutique-mcp",
         description="Inspect the SiliconBoutique MCP boundary package.",
@@ -102,6 +119,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command-line entrypoint.
+
+
+    Args:
+        argv: argv (Sequence[str] | None) used by this operation.
+
+    Returns:
+        Process exit code for the command.
+    """
     args = parse_args(argv)
     try:
         if args.manifest:
@@ -151,6 +177,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def benchmark_request_from_json(path: Path) -> BenchmarkRunRequest:
+    """Compute benchmark request from JSON.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        BenchmarkRunRequest value produced by benchmark request from JSON.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ToolContractError("trigger request JSON must be an object")

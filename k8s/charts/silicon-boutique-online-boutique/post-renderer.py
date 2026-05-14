@@ -7,10 +7,28 @@ import sys
 
 
 def leading_spaces(line):
+    """Compute leading spaces.
+
+
+    Args:
+        line: line used by this operation.
+
+    Returns:
+        Result produced by leading spaces.
+    """
     return len(line) - len(line.lstrip(" "))
 
 
 def split_documents(text):
+    """Compute split documents.
+
+
+    Args:
+        text: text used by this operation.
+
+    Returns:
+        Result produced by split documents.
+    """
     docs = []
     current = []
     for line in text.splitlines():
@@ -24,6 +42,16 @@ def split_documents(text):
 
 
 def read_block_json(lines, key):
+    """Read block JSON.
+
+
+    Args:
+        lines: lines used by this operation.
+        key: key used by this operation.
+
+    Returns:
+        Result produced by read block JSON.
+    """
     for index, line in enumerate(lines):
         if re.match(rf"^\s*{re.escape(key)}:\s*\|-\s*$", line):
             base_indent = leading_spaces(line)
@@ -37,6 +65,15 @@ def read_block_json(lines, key):
 
 
 def find_metadata(lines):
+    """Find metadata.
+
+
+    Args:
+        lines: lines used by this operation.
+
+    Returns:
+        Result produced by find metadata.
+    """
     for index, line in enumerate(lines):
         if line == "metadata:":
             return index
@@ -44,6 +81,15 @@ def find_metadata(lines):
 
 
 def document_kind(lines):
+    """Compute document kind.
+
+
+    Args:
+        lines: lines used by this operation.
+
+    Returns:
+        Result produced by document kind.
+    """
     for line in lines:
         match = re.match(r"^kind:\s*(\S+)\s*$", line)
         if match:
@@ -52,6 +98,15 @@ def document_kind(lines):
 
 
 def metadata_name(lines):
+    """Compute metadata name.
+
+
+    Args:
+        lines: lines used by this operation.
+
+    Returns:
+        Result produced by metadata name.
+    """
     metadata_index = find_metadata(lines)
     if metadata_index is None:
         return None
@@ -67,6 +122,17 @@ def metadata_name(lines):
 
 
 def section_end(lines, start, indent):
+    """Compute section end.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+        indent: indent used by this operation.
+
+    Returns:
+        Result produced by section end.
+    """
     for index in range(start + 1, len(lines)):
         if lines[index].strip() and leading_spaces(lines[index]) <= indent:
             return index
@@ -74,6 +140,16 @@ def section_end(lines, start, indent):
 
 
 def sequence_end(lines, start):
+    """Compute sequence end.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+
+    Returns:
+        Result produced by sequence end.
+    """
     indent = leading_spaces(lines[start])
     for index in range(start + 1, len(lines)):
         if not lines[index].strip():
@@ -87,6 +163,18 @@ def sequence_end(lines, start):
 
 
 def ensure_mapping(lines, parent_index, child_name, values):
+    """Ensure mapping.
+
+
+    Args:
+        lines: lines used by this operation.
+        parent_index: parent index used by this operation.
+        child_name: child name used by this operation.
+        values: values used by this operation.
+
+    Returns:
+        None.
+    """
     parent_indent = leading_spaces(lines[parent_index])
     parent_end = section_end(lines, parent_index, parent_indent)
     child_indent = parent_indent + 2
@@ -120,6 +208,17 @@ def ensure_mapping(lines, parent_index, child_name, values):
 
 
 def patch_template_metadata(lines, child_name, values):
+    """Compute patch template metadata.
+
+
+    Args:
+        lines: lines used by this operation.
+        child_name: child name used by this operation.
+        values: values used by this operation.
+
+    Returns:
+        None.
+    """
     template_indexes = [
         index
         for index, line in enumerate(lines)
@@ -145,6 +244,18 @@ def patch_template_metadata(lines, child_name, values):
 
 
 def find_line(lines, start, end, pattern):
+    """Find line.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+        end: end used by this operation.
+        pattern: pattern used by this operation.
+
+    Returns:
+        Result produced by find line.
+    """
     for index in range(start, end):
         if re.match(pattern, lines[index]):
             return index
@@ -152,6 +263,19 @@ def find_line(lines, start, end, pattern):
 
 
 def find_named_list_item(lines, start, end, item_indent, name):
+    """Find named list item.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+        end: end used by this operation.
+        item_indent: item indent used by this operation.
+        name: name used by this operation.
+
+    Returns:
+        Result produced by find named list item.
+    """
     for index in range(start, end):
         if not re.match(rf"^ {{{item_indent}}}-\s+name:\s*{re.escape(name)}\s*$", lines[index]):
             continue
@@ -167,6 +291,19 @@ def find_named_list_item(lines, start, end, item_indent, name):
 
 
 def ensure_env_var(lines, env_index, env_end, name, value):
+    """Ensure environment var.
+
+
+    Args:
+        lines: lines used by this operation.
+        env_index: environment index used by this operation.
+        env_end: environment end used by this operation.
+        name: name used by this operation.
+        value: value used by this operation.
+
+    Returns:
+        Result produced by ensure environment var.
+    """
     env_indent = leading_spaces(lines[env_index])
     item_indent = env_indent
     name_index, item_end = find_named_list_item(lines, env_index + 1, env_end, item_indent, name)
@@ -193,6 +330,16 @@ def ensure_env_var(lines, env_index, env_end, name, value):
 
 
 def patch_loadgenerator_env(lines, load_generator):
+    """Compute patch loadgenerator environment.
+
+
+    Args:
+        lines: lines used by this operation.
+        load_generator: load generator used by this operation.
+
+    Returns:
+        None.
+    """
     if document_kind(lines) != "Deployment" or metadata_name(lines) != "loadgenerator":
         return
 
@@ -234,6 +381,18 @@ def patch_loadgenerator_env(lines, load_generator):
 
 
 def patch_document(document, labels, annotations, load_generator):
+    """Compute patch document.
+
+
+    Args:
+        document: document used by this operation.
+        labels: labels used by this operation.
+        annotations: annotations used by this operation.
+        load_generator: load generator used by this operation.
+
+    Returns:
+        Result produced by patch document.
+    """
     if not document.strip():
         return document
 
@@ -251,6 +410,12 @@ def patch_document(document, labels, annotations, load_generator):
 
 
 def main():
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     rendered = sys.stdin.read()
     docs = split_documents(rendered)
     labels = None

@@ -1,3 +1,5 @@
+"""Tests for test run local benchmark workflow."""
+
 import contextlib
 import io
 import json
@@ -10,6 +12,8 @@ from automation.scripts import run_local_benchmark_workflow
 
 
 class FakeRunner:
+    """Test double that records runner interactions.
+    """
     def __init__(
         self,
         *,
@@ -17,12 +21,34 @@ class FakeRunner:
         bigquery_rows=None,
         fail_steps=None,
     ):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            kubectl_failures: kubectl failures used by this operation.
+            bigquery_rows: BigQuery rows used by this operation.
+            fail_steps: fail steps used by this operation.
+
+        Returns:
+            None.
+        """
         self.commands = []
         self.kubectl_failures = kubectl_failures
         self.bigquery_rows = bigquery_rows
         self.fail_steps = fail_steps or {}
 
     def run(self, command, *, cwd=None, env=None):
+        """Run the configured operation.
+
+
+        Args:
+            command: command used by this operation.
+            cwd: cwd used by this operation.
+            env: environment used by this operation.
+
+        Returns:
+            Result produced by run.
+        """
         rendered = [str(part) for part in command]
         self.commands.append(
             {
@@ -65,13 +91,27 @@ class FakeRunner:
 
 
 class LocalBenchmarkWorkflowTest(unittest.TestCase):
+    """Unit tests covering local Benchmark Workflow behavior.
+    """
     def test_default_run_id_is_dns_safe(self):
+        """Verify default run ID is dns safe.
+
+
+        Returns:
+            None.
+        """
         run_id = run_local_benchmark_workflow.default_run_id()
 
         self.assertRegex(run_id, r"^local-smoke-[0-9]{8}-[0-9]{6}$")
         self.assertLessEqual(len(run_id), 46)
 
     def test_config_loads_bigquery_env_without_leaking_secret_values(self):
+        """Verify config loads BigQuery environment without leaking secret values.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             env_file = Path(tmpdir) / "credential.env"
             env_file.write_text(
@@ -118,6 +158,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertNotIn("/tmp/secret-key.json", log)
 
     def test_unreachable_kubernetes_runs_repair_then_benchmark(self):
+        """Verify unreachable kubernetes runs repair then benchmark.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, runner = make_workflow(tmpdir, runner=FakeRunner(kubectl_failures=1))
 
@@ -139,6 +185,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             )
 
     def test_skip_minikube_repair_fails_fast(self):
+        """Verify skip minikube repair fails fast.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, runner = make_workflow(
                 tmpdir,
@@ -157,6 +209,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertIn("post-create", issue["suggestion"])
 
     def test_local_benchmark_command_uses_bigquery_and_run_scoped_artifacts(self):
+        """Verify local benchmark command uses BigQuery and run scoped artifacts.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, runner = make_workflow(tmpdir)
 
@@ -176,6 +234,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertIn("--min-duration-seconds 60", command)
 
     def test_bigquery_validation_success_writes_report(self):
+        """Verify BigQuery validation success writes report.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, _ = make_workflow(tmpdir)
 
@@ -189,6 +253,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             )
 
     def test_bigquery_validation_rejects_zero_rows(self):
+        """Verify BigQuery validation rejects zero rows.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, _ = make_workflow(tmpdir, runner=FakeRunner(bigquery_rows=[]))
 
@@ -201,6 +271,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertIn("exactly one row", issue["message"])
 
     def test_bigquery_validation_rejects_duplicate_rows(self):
+        """Verify BigQuery validation rejects duplicate rows.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             rows = [
                 {"run_id": "local-smoke-20260511-201554", "summary_status": "complete"},
@@ -216,6 +292,12 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertIn("found 2", issue["message"])
 
     def test_bigquery_validation_query_failure_writes_issue(self):
+        """Verify BigQuery validation query failure writes issue.
+
+
+        Returns:
+            None.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             workflow, _ = make_workflow(
                 tmpdir,
@@ -235,6 +317,16 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
             self.assertNotIn("secret-value", issue_text)
 
     def assertCommandOrder(self, commands, expected_prefixes):
+        """Assert that command Order matches expectations.
+
+
+        Args:
+            commands: commands used by this operation.
+            expected_prefixes: expected prefixes used by this operation.
+
+        Returns:
+            None.
+        """
         search_from = 0
         for expected in expected_prefixes:
             for index in range(search_from, len(commands)):
@@ -246,6 +338,17 @@ class LocalBenchmarkWorkflowTest(unittest.TestCase):
 
 
 def make_workflow(tmpdir, *, extra_args=None, runner=None):
+    """Compute make workflow.
+
+
+    Args:
+        tmpdir: tmpdir used by this operation.
+        extra_args: extra arguments used by this operation.
+        runner: runner used by this operation.
+
+    Returns:
+        Result produced by make workflow.
+    """
     env_file = Path(tmpdir) / "credential.env"
     env_file.write_text(
         "\n".join(
@@ -281,6 +384,15 @@ def make_workflow(tmpdir, *, extra_args=None, runner=None):
 
 
 def command_strings(runner):
+    """Compute command strings.
+
+
+    Args:
+        runner: runner used by this operation.
+
+    Returns:
+        Result produced by command strings.
+    """
     return [" ".join(record["command"]) for record in runner.commands]
 
 

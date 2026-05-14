@@ -1,8 +1,26 @@
+"""Tests for chart test utils."""
+
 import subprocess
 from pathlib import Path
 
 
 def render_helm_template(repo_root: Path, chart: Path, release: str, namespace: str, *extra_args):
+    """Render helm template.
+
+
+    Args:
+        repo_root: repo root (Path) used by this operation.
+        chart: chart (Path) used by this operation.
+        release: release (str) used by this operation.
+        namespace: namespace (str) used by this operation.
+        extra_args: extra arguments used by this operation.
+
+    Returns:
+        Result produced by render Helm template.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     helm = subprocess.run(
         [
             "helm",
@@ -24,6 +42,15 @@ def render_helm_template(repo_root: Path, chart: Path, release: str, namespace: 
 
 
 def split_documents(rendered):
+    """Compute split documents.
+
+
+    Args:
+        rendered: rendered used by this operation.
+
+    Returns:
+        Result produced by split documents.
+    """
     return [
         document.strip("\n")
         for document in rendered.split("\n---\n")
@@ -32,6 +59,16 @@ def split_documents(rendered):
 
 
 def top_level_value(document, key):
+    """Compute top level value.
+
+
+    Args:
+        document: document used by this operation.
+        key: key used by this operation.
+
+    Returns:
+        Result produced by top level value.
+    """
     prefix = f"{key}:"
     for line in document.splitlines():
         if line.startswith(prefix):
@@ -40,6 +77,15 @@ def top_level_value(document, key):
 
 
 def metadata_name(document):
+    """Compute metadata name.
+
+
+    Args:
+        document: document used by this operation.
+
+    Returns:
+        Result produced by metadata name.
+    """
     lines = document.splitlines()
     for index, line in enumerate(lines):
         if line == "metadata:":
@@ -52,6 +98,16 @@ def metadata_name(document):
 
 
 def label_value(document, key):
+    """Compute label value.
+
+
+    Args:
+        document: document used by this operation.
+        key: key used by this operation.
+
+    Returns:
+        Result produced by label value.
+    """
     lines = document.splitlines()
     in_metadata = False
     in_labels = False
@@ -75,6 +131,19 @@ def label_value(document, key):
 
 
 def literal_data_value(document, key):
+    """Compute literal data value.
+
+
+    Args:
+        document: document used by this operation.
+        key: key used by this operation.
+
+    Returns:
+        Result produced by literal data value.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     lines = document.splitlines()
     marker = f"  {key}: |-"
     for index, line in enumerate(lines):
@@ -91,10 +160,30 @@ def literal_data_value(document, key):
 
 
 def leading_spaces(line):
+    """Compute leading spaces.
+
+
+    Args:
+        line: line used by this operation.
+
+    Returns:
+        Result produced by leading spaces.
+    """
     return len(line) - len(line.lstrip(" "))
 
 
 def section_end(lines, start, indent):
+    """Compute section end.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+        indent: indent used by this operation.
+
+    Returns:
+        Result produced by section end.
+    """
     for index in range(start + 1, len(lines)):
         if lines[index].strip() and leading_spaces(lines[index]) <= indent:
             return index
@@ -102,6 +191,16 @@ def section_end(lines, start, indent):
 
 
 def sequence_end(lines, start):
+    """Compute sequence end.
+
+
+    Args:
+        lines: lines used by this operation.
+        start: start used by this operation.
+
+    Returns:
+        Result produced by sequence end.
+    """
     indent = leading_spaces(lines[start])
     for index in range(start + 1, len(lines)):
         if not lines[index].strip():

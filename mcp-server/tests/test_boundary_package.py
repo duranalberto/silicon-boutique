@@ -1,3 +1,5 @@
+"""Tests for test boundary package."""
+
 import ast
 import json
 import os
@@ -10,7 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MCP_SRC = REPO_ROOT / "mcp-server" / "src"
 PACKAGE_ROOT = MCP_SRC / "silicon_boutique_mcp"
-FORBIDDEN_ROOT_IMPORTS = {"automation", "infra", "k8s", "github", "google"}
+FORBIDDEN_ROOT_IMPORTS = {"automation", "infra", "k8s", "GitHub", "google"}
 FORBIDDEN_IMPORT_TEXT = (
     ".github/workflows",
     "google.cloud",
@@ -18,10 +20,24 @@ FORBIDDEN_IMPORT_TEXT = (
 
 
 class McpBoundaryPackageTest(unittest.TestCase):
+    """Unit tests covering mCP Boundary Package behavior.
+    """
     def env(self):
+        """Compute environment.
+
+
+        Returns:
+            Result produced by environment.
+        """
         return {**os.environ, "PYTHONPATH": str(MCP_SRC)}
 
     def test_package_imports_cleanly(self):
+        """Verify package imports cleanly.
+
+
+        Returns:
+            None.
+        """
         result = subprocess.run(
             [
                 sys.executable,
@@ -38,7 +54,39 @@ class McpBoundaryPackageTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "silicon_boutique_mcp")
 
+    def test_dead_status_request_model_is_not_exported(self):
+        """Verify dead status request model is not exported.
+
+
+        Returns:
+            None.
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import silicon_boutique_mcp; "
+                    "print(hasattr(silicon_boutique_mcp, 'GetBenchmarkStatusRequest'))"
+                ),
+            ],
+            cwd=REPO_ROOT,
+            env=self.env(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "False")
+
     def test_module_help_is_discoverable(self):
+        """Verify module help is discoverable.
+
+
+        Returns:
+            None.
+        """
         result = subprocess.run(
             [sys.executable, "-m", "silicon_boutique_mcp", "--help"],
             cwd=REPO_ROOT,
@@ -53,6 +101,12 @@ class McpBoundaryPackageTest(unittest.TestCase):
         self.assertIn("--manifest", result.stdout)
 
     def test_manifest_lists_boundary_capability_names(self):
+        """Verify manifest lists boundary capability names.
+
+
+        Returns:
+            None.
+        """
         result = subprocess.run(
             [sys.executable, "-m", "silicon_boutique_mcp", "--manifest"],
             cwd=REPO_ROOT,
@@ -77,6 +131,12 @@ class McpBoundaryPackageTest(unittest.TestCase):
         )
 
     def test_boundary_modules_do_not_import_pipeline_internals(self):
+        """Verify boundary modules do not import pipeline internals.
+
+
+        Returns:
+            None.
+        """
         for path in PACKAGE_ROOT.glob("*.py"):
             source = path.read_text(encoding="utf-8")
             for forbidden_text in FORBIDDEN_IMPORT_TEXT:

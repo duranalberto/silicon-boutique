@@ -21,6 +21,23 @@ For completed work, tickets are compressed to a single line describing the outco
 
 This section lists current and upcoming work.
 
+## Phase 13: Unified Workflow Coordinator
+
+### P13.1 - Add a source-agnostic workflow entrypoint
+`automation/scripts/run_benchmark_workflow.py` now coordinates local, GCP, AWS, and all-target benchmark workflows from one command while preserving existing scripts as stable wrappers.
+
+### P13.2 - Keep cloud execution guarded behind GitHub Actions
+The unified coordinator preflights `gh`, dispatches GCP/AWS workflow files, waits by default, downloads artifacts, and verifies evidence without running cloud Terraform locally.
+
+### P13.3 - Add reusable automation library modules
+Shared command, environment, GitHub Actions, reporting, and unified workflow helpers were added under `automation/lib/silicon_boutique_automation/`.
+
+### P13.4 - Document unified workflow usage
+The README, automation docs, script index, and runbook now describe the unified CLI, BigQuery requirements, cloud safety behavior, and generated report location.
+
+### P13.5 - Consolidate Markdown operator documentation
+The local usage guide was removed and the runbook became the single global workflow document for local, GCP, AWS, BigQuery, dashboard, acceptance, teardown, and troubleshooting commands.
+
 ## Phase 12: Portable Metrics Dashboard
 
 ### P12.1 - Add a one-command dashboard launcher

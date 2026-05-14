@@ -70,10 +70,29 @@ class QuietDashboardHandler(SimpleHTTPRequestHandler):
     """HTTP handler that avoids noisy per-request logs during local inspection."""
 
     def log_message(self, format: str, *args: Any) -> None:
+        """Compute log message.
+
+
+        Args:
+            format: format (str) used by this operation.
+            args: arguments (Any) used by this operation.
+
+        Returns:
+            None.
+        """
         return
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse arguments.
+
+
+    Returns:
+        argparse.Namespace value produced by parse arguments.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     parser = argparse.ArgumentParser(
         description="Generate and serve a local SiliconBoutique metrics dashboard."
     )
@@ -123,6 +142,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run the command-line entrypoint.
+
+
+    Returns:
+        Process exit code for the command.
+    """
     try:
         args = parse_args()
     except SystemExit as exc:
@@ -155,7 +180,7 @@ def main() -> int:
         DashboardLaunchError,
         comparison.ComparisonReportError,
         comparison.comparability.ComparabilityError,
-        comparison.bigquery.BigQueryLoadError,
+        comparison.BigQuery.BigQueryLoadError,
         OSError,
     ) as exc:
         print(str(exc), file=sys.stderr)
@@ -172,7 +197,21 @@ def build_dashboard(
     min_coverage_ratio: float,
     runner: comparison.Runner = comparison.run_bq,
 ) -> dict[str, Any]:
-    filters = filter_values(args)
+    """Build dashboard.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        output_dir: output dir (Path) used by this operation.
+        schema_path: schema path (Path) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+        runner: runner (comparison.Runner) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build dashboard.
+    """
+    filters = comparison.filter_values(args)
     rows, source = load_dashboard_rows(args, filters=filters, runner=runner)
     filtered_rows = comparison.apply_filters(rows, filters)
     if args.limit is not None and source["type"] == "ndjson":
@@ -212,6 +251,17 @@ def load_dashboard_rows(
     filters: dict[str, str],
     runner: comparison.Runner = comparison.run_bq,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load dashboard rows.
+
+
+    Args:
+        args: arguments (argparse.Namespace) used by this operation.
+        filters: filters (dict[str, str]) used by this operation.
+        runner: runner (comparison.Runner) used by this operation.
+
+    Returns:
+        tuple[list[dict[str, Any]], dict[str, Any]] value produced by load dashboard rows.
+    """
     if args.project_id:
         rows = comparison.query_bigquery_rows(
             project_id=args.project_id,
@@ -224,7 +274,7 @@ def load_dashboard_rows(
         )
         return rows, {
             "type": "bigquery",
-            "summary_table": comparison.bigquery.table_sql_name(
+            "summary_table": comparison.bq_helpers.table_sql_name(
                 args.project_id, args.dataset_id, args.table_id
             ),
             "location": args.location,
@@ -245,6 +295,21 @@ def build_dashboard_payload(
     min_duration_seconds: int,
     min_coverage_ratio: float,
 ) -> dict[str, Any]:
+    """Build dashboard payload.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+        filtered_rows: filtered rows (list[dict[str, Any]]) used by this operation.
+        report: report (dict[str, Any]) used by this operation.
+        filters: filters (dict[str, str]) used by this operation.
+        limit: limit (int | None) used by this operation.
+        min_duration_seconds: min duration seconds (int) used by this operation.
+        min_coverage_ratio: min coverage ratio (float) used by this operation.
+
+    Returns:
+        dict[str, Any] value produced by build dashboard payload.
+    """
     return {
         "source": report["source"],
         "generated_at": report["generated_at"],
@@ -258,6 +323,7 @@ def build_dashboard_payload(
             "row_count": len(rows),
             "filtered_row_count": len(filtered_rows),
             "duplicate_run_ids": duplicate_run_ids(filtered_rows),
+            "suspect_run_ids": report.get("suspect_run_ids", []),
         },
         "latest_run": latest_run_metadata(filtered_rows),
         "comparison": report,
@@ -265,12 +331,28 @@ def build_dashboard_payload(
 
 
 def write_dashboard_files(output_dir: Path, payload: dict[str, Any]) -> None:
+    """Write dashboard files.
+
+
+    Args:
+        output_dir: output dir (Path) used by this operation.
+        payload: payload (dict[str, Any]) used by this operation.
+
+    Returns:
+        None.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     automation.write_json(output_dir / DATA_FILENAME, payload)
     write_text(output_dir / INDEX_FILENAME, render_html())
 
 
 def render_html() -> str:
+    """Render hTML.
+
+
+    Returns:
+        str value produced by render HTML.
+    """
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -612,6 +694,15 @@ def render_html() -> str:
 
 
 def latest_run_metadata(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Compute latest run metadata.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        dict[str, Any] | None value produced by latest run metadata.
+    """
     latest = latest_row(rows)
     if latest is None:
         return None
@@ -622,33 +713,51 @@ def latest_run_metadata(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def latest_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Compute latest row.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        dict[str, Any] | None value produced by latest row.
+    """
     if not rows:
         return None
     return max(rows, key=lambda row: str(row.get("benchmark_start") or ""))
 
 
 def duplicate_run_ids(rows: list[dict[str, Any]]) -> list[str]:
+    """Compute duplicate run IDs.
+
+
+    Args:
+        rows: rows (list[dict[str, Any]]) used by this operation.
+
+    Returns:
+        list[str] value produced by duplicate run IDs.
+    """
     counts = Counter(str(row.get("run_id")) for row in rows if row.get("run_id"))
     return sorted(run_id for run_id, count in counts.items() if count > 1)
-
-
-def filter_values(args: argparse.Namespace) -> dict[str, str]:
-    return {
-        field: value
-        for field, value in (
-            ("machine_type", args.machine_type),
-            ("processor_family", args.processor_family),
-            ("architecture", args.architecture),
-            ("cloud_provider", args.cloud_provider),
-            ("pricing_model", args.pricing_model),
-        )
-        if value is not None
-    }
 
 
 def create_server(
     output_dir: Path, *, host: str, port: int
 ) -> tuple[ThreadingHTTPServer, str]:
+    """Create server.
+
+
+    Args:
+        output_dir: output dir (Path) used by this operation.
+        host: host (str) used by this operation.
+        port: port (int) used by this operation.
+
+    Returns:
+        tuple[ThreadingHTTPServer, str] value produced by create server.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     handler = functools.partial(QuietDashboardHandler, directory=str(output_dir))
     last_error: OSError | None = None
@@ -669,6 +778,16 @@ def create_server(
 
 
 def write_text(path: Path, text: str) -> None:
+    """Write text.
+
+
+    Args:
+        path: path (Path) used by this operation.
+        text: text (str) used by this operation.
+
+    Returns:
+        None.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 

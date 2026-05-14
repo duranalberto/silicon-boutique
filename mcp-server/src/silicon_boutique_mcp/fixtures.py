@@ -16,16 +16,47 @@ from silicon_boutique_mcp.models import (
 
 
 class WorkflowTraceFixtureAdapter:
-    """Read benchmark status data from local workflow trace JSON fixtures."""
+    """Container for workflow Trace Fixture Adapter state and behavior.
+    """
 
     def __init__(self, trace_fixture: Path):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            trace_fixture: trace fixture (Path) used by this operation.
+
+        Returns:
+            None.
+        """
         self.trace_fixture = trace_fixture
         self.records = load_trace_records(trace_fixture)
 
     def trigger_benchmark_run(self, request: BenchmarkRunRequest) -> RunIdentity:
+        """Trigger benchmark run.
+
+
+        Args:
+            request: request (BenchmarkRunRequest) used by this operation.
+
+        Returns:
+            RunIdentity value produced by trigger benchmark run.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         raise NotImplementedError("fixture adapter does not trigger benchmark runs")
 
     def get_benchmark_status(self, run_id: str) -> WorkflowTrace:
+        """Return benchmark status.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            WorkflowTrace value produced by get benchmark status.
+        """
         record = find_trace_record(self.records, run_id)
         if record is None:
             return WorkflowTrace(
@@ -43,9 +74,19 @@ class WorkflowTraceFixtureAdapter:
 
 
 class SummaryStoreFixtureAdapter:
-    """Read historical benchmark summaries from a local NDJSON store."""
+    """Container for summary Store Fixture Adapter state and behavior.
+    """
 
     def __init__(self, summary_store: Path):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            summary_store: summary store (Path) used by this operation.
+
+        Returns:
+            None.
+        """
         self.summary_store = summary_store
         self.rows = load_summary_rows(summary_store)
 
@@ -57,6 +98,18 @@ class SummaryStoreFixtureAdapter:
         architecture: str | None = None,
         limit: int = 10,
     ) -> list[BenchmarkSummaryReference]:
+        """Query historical metrics.
+
+
+        Args:
+            machine_type: machine type (str | None) used by this operation.
+            processor_family: processor family (str | None) used by this operation.
+            architecture: architecture (str | None) used by this operation.
+            limit: limit (int) used by this operation.
+
+        Returns:
+            list[BenchmarkSummaryReference] value produced by query historical metrics.
+        """
         matches = []
         for row in self.rows:
             if machine_type is not None and row.get("machine_type") != machine_type:
@@ -75,6 +128,18 @@ class SummaryStoreFixtureAdapter:
 
 
 def load_trace_records(path: Path) -> list[dict[str, Any]]:
+    """Load trace records.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by load trace records.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     payload = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(payload, list):
         return [record for record in payload if isinstance(record, dict)]
@@ -86,6 +151,18 @@ def load_trace_records(path: Path) -> list[dict[str, Any]]:
 
 
 def load_summary_rows(path: Path) -> list[dict[str, Any]]:
+    """Load summary rows.
+
+
+    Args:
+        path: path (Path) used by this operation.
+
+    Returns:
+        list[dict[str, Any]] value produced by load summary rows.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     rows = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -101,6 +178,16 @@ def find_trace_record(
     records: list[dict[str, Any]],
     run_id: str,
 ) -> dict[str, Any] | None:
+    """Find trace record.
+
+
+    Args:
+        records: records (list[dict[str, Any]]) used by this operation.
+        run_id: run ID (str) used by this operation.
+
+    Returns:
+        dict[str, Any] | None value produced by find trace record.
+    """
     for record in records:
         if trace_value(record, "run_id") == run_id:
             return record
@@ -108,6 +195,16 @@ def find_trace_record(
 
 
 def workflow_trace_from_record(record: dict[str, Any], requested_run_id: str) -> WorkflowTrace:
+    """Compute workflow trace from record.
+
+
+    Args:
+        record: record (dict[str, Any]) used by this operation.
+        requested_run_id: requested run ID (str) used by this operation.
+
+    Returns:
+        WorkflowTrace value produced by workflow trace from record.
+    """
     benchmark = record.get("benchmark") if isinstance(record.get("benchmark"), dict) else {}
     artifacts = record.get("artifacts") if isinstance(record.get("artifacts"), dict) else {}
     teardown = record.get("teardown") if isinstance(record.get("teardown"), dict) else {}
@@ -159,12 +256,31 @@ def workflow_trace_from_record(record: dict[str, Any], requested_run_id: str) ->
 
 
 def trace_value(record: dict[str, Any], field_name: str) -> str | None:
+    """Compute trace value.
+
+
+    Args:
+        record: record (dict[str, Any]) used by this operation.
+        field_name: field name (str) used by this operation.
+
+    Returns:
+        str | None value produced by trace value.
+    """
     benchmark = record.get("benchmark") if isinstance(record.get("benchmark"), dict) else {}
     value = record.get(field_name) or benchmark.get(field_name)
     return string_or_none(value)
 
 
 def trace_status(record: dict[str, Any]) -> BenchmarkRunStatus:
+    """Compute trace status.
+
+
+    Args:
+        record: record (dict[str, Any]) used by this operation.
+
+    Returns:
+        BenchmarkRunStatus value produced by trace status.
+    """
     explicit_status = trace_value(record, "status")
     if explicit_status:
         try:
@@ -195,6 +311,15 @@ def trace_status(record: dict[str, Any]) -> BenchmarkRunStatus:
 
 
 def summary_reference_from_row(row: dict[str, Any]) -> BenchmarkSummaryReference:
+    """Compute summary reference from row.
+
+
+    Args:
+        row: row (dict[str, Any]) used by this operation.
+
+    Returns:
+        BenchmarkSummaryReference value produced by summary reference from row.
+    """
     return BenchmarkSummaryReference(
         run_id=string_or_default(row.get("run_id")),
         machine_type=string_or_default(row.get("machine_type")),
@@ -236,12 +361,31 @@ def summary_reference_from_row(row: dict[str, Any]) -> BenchmarkSummaryReference
 
 
 def string_or_default(value: object, default: str = "") -> str:
+    """Compute string or default.
+
+
+    Args:
+        value: value (object) used by this operation.
+        default: default (str) used by this operation.
+
+    Returns:
+        str value produced by string or default.
+    """
     if value is None:
         return default
     return str(value)
 
 
 def string_or_none(value: object) -> str | None:
+    """Compute string or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        str | None value produced by string or none.
+    """
     if value is None:
         return None
     rendered = str(value)
@@ -249,6 +393,15 @@ def string_or_none(value: object) -> str | None:
 
 
 def number_or_none(value: object) -> float | None:
+    """Compute number or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        float | None value produced by number or none.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -259,6 +412,15 @@ def number_or_none(value: object) -> float | None:
 
 
 def int_or_none(value: object) -> int | None:
+    """Compute integer or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        int | None value produced by integer or none.
+    """
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -272,6 +434,15 @@ def int_or_none(value: object) -> int | None:
 
 
 def optional_bool(value: object) -> bool | None:
+    """Compute optional boolean.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        bool | None value produced by optional boolean.
+    """
     if isinstance(value, bool):
         return value
     if isinstance(value, str):

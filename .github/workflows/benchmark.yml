@@ -484,13 +484,30 @@ jobs:
             --strict
 
       - name: Extract load generator stats
+        shell: bash
         run: |
-          kubectl logs deployment/loadgenerator \
-            --namespace "$NAMESPACE" > "$ARTIFACTS_DIR/loadgenerator.log"
+          set -euo pipefail
+
+          log_source=current
+          if kubectl logs deployment/loadgenerator \
+            --namespace "$NAMESPACE" \
+            --previous > "$ARTIFACTS_DIR/loadgenerator.log"; then
+            if grep -q "Aggregated" "$ARTIFACTS_DIR/loadgenerator.log"; then
+              log_source=previous
+            else
+              kubectl logs deployment/loadgenerator \
+                --namespace "$NAMESPACE" > "$ARTIFACTS_DIR/loadgenerator.log"
+            fi
+          else
+            kubectl logs deployment/loadgenerator \
+              --namespace "$NAMESPACE" > "$ARTIFACTS_DIR/loadgenerator.log"
+          fi
           python3 automation/scripts/extract_loadgenerator_stats.py \
             --logs-input "$ARTIFACTS_DIR/loadgenerator.log" \
             --output "$ARTIFACTS_DIR/loadgenerator-stats.json" \
             --run-id "$RUN_ID" \
+            --duration-seconds "$TEST_DURATION_SECONDS" \
+            --log-source "$log_source" \
             --strict
 
       - name: Generate benchmark summary

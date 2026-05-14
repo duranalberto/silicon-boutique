@@ -18,6 +18,7 @@ from silicon_boutique_mcp.models import (
     RunIdentity,
     WorkflowTrace,
 )
+from silicon_boutique_shared.automation import first_env
 
 
 DEFAULT_API_URL = "https://api.github.com"
@@ -50,6 +51,18 @@ class GitHubActionsConfig:
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> GitHubActionsConfig:
+        """Compute from environment.
+
+
+        Args:
+            env: environment (dict[str, str] | None) used by this operation.
+
+        Returns:
+            GitHubActionsConfig value produced by from environment.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         values = env if env is not None else os.environ
         token = first_env(values, "SILICON_BOUTIQUE_GITHUB_TOKEN", "GITHUB_TOKEN")
         repository = first_env(
@@ -136,6 +149,21 @@ class UrlLibTransport:
         headers: dict[str, str],
         body: bytes | None = None,
     ) -> HttpResponse:
+        """Compute request.
+
+
+        Args:
+            method: method (str) used by this operation.
+            url: uRL (str) used by this operation.
+            headers: headers (dict[str, str]) used by this operation.
+            body: body (bytes | None) used by this operation.
+
+        Returns:
+            HttpResponse value produced by request.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         request = Request(url, data=body, headers=headers, method=method)
         try:
             with urlopen(request, timeout=30) as response:  # noqa: S310
@@ -164,14 +192,42 @@ class GitHubActionsBenchmarkRunController:
         config: GitHubActionsConfig,
         transport: HttpTransport | None = None,
     ):
+        """Initialize the object with the provided configuration.
+
+
+        Args:
+            config: config (GitHubActionsConfig) used by this operation.
+            transport: transport (HttpTransport | None) used by this operation.
+
+        Returns:
+            None.
+        """
         self.config = config
         self.transport = transport or UrlLibTransport()
 
     @classmethod
     def from_env(cls) -> GitHubActionsBenchmarkRunController:
+        """Compute from environment.
+
+
+        Returns:
+            GitHubActionsBenchmarkRunController value produced by from environment.
+        """
         return cls(GitHubActionsConfig.from_env())
 
     def trigger_benchmark_run(self, request: BenchmarkRunRequest) -> RunIdentity:
+        """Trigger benchmark run.
+
+
+        Args:
+            request: request (BenchmarkRunRequest) used by this operation.
+
+        Returns:
+            RunIdentity value produced by trigger benchmark run.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         dispatch_started = datetime.now(timezone.utc)
         response = self.dispatch_workflow(request)
         if response.status == 200:
@@ -185,6 +241,18 @@ class GitHubActionsBenchmarkRunController:
         raise error_from_response(response, "GitHub workflow dispatch failed")
 
     def get_benchmark_status(self, run_id: str) -> WorkflowTrace:
+        """Return benchmark status.
+
+
+        Args:
+            run_id: run ID (str) used by this operation.
+
+        Returns:
+            WorkflowTrace value produced by get benchmark status.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         lookup = parse_benchmark_run_id(run_id)
         response = self.transport.request(
             "GET",
@@ -217,6 +285,19 @@ class GitHubActionsBenchmarkRunController:
         workflow_run_id: str,
         attempt: int,
     ) -> dict[str, object]:
+        """Look up workflow run attempt.
+
+
+        Args:
+            workflow_run_id: workflow run ID (str) used by this operation.
+            attempt: attempt (int) used by this operation.
+
+        Returns:
+            dict[str, object] value produced by lookup workflow run attempt.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         response = self.transport.request(
             "GET",
             self.workflow_run_attempt_url(workflow_run_id, attempt),
@@ -236,6 +317,15 @@ class GitHubActionsBenchmarkRunController:
         return parse_json_object(response.body, "workflow run attempt response")
 
     def dispatch_workflow(self, request: BenchmarkRunRequest) -> HttpResponse:
+        """Dispatch workflow.
+
+
+        Args:
+            request: request (BenchmarkRunRequest) used by this operation.
+
+        Returns:
+            HttpResponse value produced by dispatch workflow.
+        """
         payload = {
             "ref": self.config.ref,
             "inputs": workflow_inputs(request, self.config),
@@ -250,6 +340,18 @@ class GitHubActionsBenchmarkRunController:
         )
 
     def lookup_dispatched_run(self, dispatch_started: datetime) -> RunIdentity:
+        """Look up dispatched run.
+
+
+        Args:
+            dispatch_started: dispatch started (datetime) used by this operation.
+
+        Returns:
+            RunIdentity value produced by lookup dispatched run.
+
+        Raises:
+            SystemExit or ValueError when input validation fails.
+        """
         query = urlencode(
             {
                 "branch": self.config.ref,
@@ -302,34 +404,80 @@ class GitHubActionsBenchmarkRunController:
         return identity_from_run(candidates[0])
 
     def workflow_dispatch_url(self) -> str:
+        """Compute workflow dispatch URL.
+
+
+        Returns:
+            str value produced by workflow dispatch URL.
+        """
         return (
             f"{self.base_repo_url()}/actions/workflows/"
             f"{self.config.workflow_id}/dispatches"
         )
 
     def workflow_runs_url(self) -> str:
+        """Compute workflow runs URL.
+
+
+        Returns:
+            str value produced by workflow runs URL.
+        """
         return (
             f"{self.base_repo_url()}/actions/workflows/"
             f"{self.config.workflow_id}/runs"
         )
 
     def workflow_run_url(self, workflow_run_id: str) -> str:
+        """Compute workflow run URL.
+
+
+        Args:
+            workflow_run_id: workflow run ID (str) used by this operation.
+
+        Returns:
+            str value produced by workflow run URL.
+        """
         return f"{self.base_repo_url()}/actions/runs/{workflow_run_id}"
 
     def workflow_run_attempt_url(self, workflow_run_id: str, attempt: int) -> str:
+        """Compute workflow run attempt URL.
+
+
+        Args:
+            workflow_run_id: workflow run ID (str) used by this operation.
+            attempt: attempt (int) used by this operation.
+
+        Returns:
+            str value produced by workflow run attempt URL.
+        """
         return f"{self.workflow_run_url(workflow_run_id)}/attempts/{attempt}"
 
     def base_repo_url(self) -> str:
+        """Compute base repo URL.
+
+
+        Returns:
+            str value produced by base repo URL.
+        """
         return (
             f"{self.config.api_url.rstrip('/')}/repos/"
             f"{self.config.owner}/{self.config.repo}"
         )
 
     def headers(self, *, content_type: bool = False) -> dict[str, str]:
+        """Compute headers.
+
+
+        Args:
+            content_type: content type (bool) used by this operation.
+
+        Returns:
+            dict[str, str] value produced by headers.
+        """
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.config.token}",
-            "X-GitHub-Api-Version": API_VERSION,
+            "X-github-Api-Version": API_VERSION,
         }
         if content_type:
             headers["Content-Type"] = "application/json"
@@ -347,6 +495,12 @@ class WorkflowRunLookup:
 
     @property
     def canonical_run_id(self) -> str:
+        """Compute canonical run ID.
+
+
+        Returns:
+            str value produced by canonical run ID.
+        """
         return f"gha-{self.workflow_run_id}-{self.attempt}"
 
 
@@ -354,6 +508,16 @@ def workflow_inputs(
     request: BenchmarkRunRequest,
     config: GitHubActionsConfig,
 ) -> dict[str, object]:
+    """Compute workflow inputs.
+
+
+    Args:
+        request: request (BenchmarkRunRequest) used by this operation.
+        config: config (GitHubActionsConfig) used by this operation.
+
+    Returns:
+        dict[str, object] value produced by workflow inputs.
+    """
     inputs: dict[str, object] = {
         "project_id": request.project_id.strip(),
         "region": request.region.strip(),
@@ -378,6 +542,15 @@ def workflow_inputs(
 
 
 def identity_from_dispatch_payload(payload: dict[str, object]) -> RunIdentity | None:
+    """Compute identity from dispatch payload.
+
+
+    Args:
+        payload: payload (dict[str, object]) used by this operation.
+
+    Returns:
+        RunIdentity | None value produced by identity from dispatch payload.
+    """
     workflow_run_id = payload.get("workflow_run_id")
     if workflow_run_id is None:
         return None
@@ -388,6 +561,18 @@ def identity_from_dispatch_payload(payload: dict[str, object]) -> RunIdentity | 
 
 
 def identity_from_run(run: dict[str, object]) -> RunIdentity:
+    """Compute identity from run.
+
+
+    Args:
+        run: run (dict[str, object]) used by this operation.
+
+    Returns:
+        RunIdentity value produced by identity from run.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     workflow_run_id = run.get("id")
     if workflow_run_id is None:
         raise GitHubActionsAdapterError("GitHub workflow run did not include id")
@@ -402,6 +587,19 @@ def identity_from_external_values(
     workflow_run_id: object,
     html_url: object,
 ) -> RunIdentity:
+    """Compute identity from external values.
+
+
+    Args:
+        workflow_run_id: workflow run ID (object) used by this operation.
+        html_url: hTML URL (object) used by this operation.
+
+    Returns:
+        RunIdentity value produced by identity from external values.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     external_run_id = str(workflow_run_id).strip()
     if not external_run_id:
         raise GitHubActionsAdapterError("GitHub workflow run id was empty")
@@ -414,6 +612,18 @@ def identity_from_external_values(
 
 
 def parse_benchmark_run_id(run_id: str) -> WorkflowRunLookup:
+    """Parse benchmark run ID.
+
+
+    Args:
+        run_id: run ID (str) used by this operation.
+
+    Returns:
+        WorkflowRunLookup value produced by parse benchmark run ID.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     cleaned = run_id.strip() if isinstance(run_id, str) else ""
     match = RUN_ID_PATTERN.match(cleaned)
     if match:
@@ -442,6 +652,16 @@ def workflow_trace_from_run(
     run: dict[str, object],
     lookup: WorkflowRunLookup,
 ) -> WorkflowTrace:
+    """Compute workflow trace from run.
+
+
+    Args:
+        run: run (dict[str, object]) used by this operation.
+        lookup: lookup (WorkflowRunLookup) used by this operation.
+
+    Returns:
+        WorkflowTrace value produced by workflow trace from run.
+    """
     workflow_run_id = string_or_default(run.get("id"), lookup.workflow_run_id)
     attempt = int_or_none(run.get("run_attempt")) or lookup.attempt
     status = map_workflow_run_status(
@@ -473,6 +693,15 @@ def workflow_trace_from_run(
 
 
 def unknown_workflow_trace(run_id: str) -> WorkflowTrace:
+    """Compute unknown workflow trace.
+
+
+    Args:
+        run_id: run ID (str) used by this operation.
+
+    Returns:
+        WorkflowTrace value produced by unknown workflow trace.
+    """
     return WorkflowTrace(
         identity=RunIdentity(run_id=run_id),
         status=BenchmarkRunStatus.UNKNOWN,
@@ -490,6 +719,16 @@ def map_workflow_run_status(
     status: str | None,
     conclusion: str | None,
 ) -> BenchmarkRunStatus:
+    """Compute map workflow run status.
+
+
+    Args:
+        status: status (str | None) used by this operation.
+        conclusion: conclusion (str | None) used by this operation.
+
+    Returns:
+        BenchmarkRunStatus value produced by map workflow run status.
+    """
     if status in {"queued", "requested", "waiting", "pending"}:
         return BenchmarkRunStatus.QUEUED
     if status == "in_progress":
@@ -504,10 +743,33 @@ def map_workflow_run_status(
 
 
 def canonical_benchmark_run_id(workflow_run_id: object, attempt: int) -> str:
+    """Compute canonical benchmark run ID.
+
+
+    Args:
+        workflow_run_id: workflow run ID (object) used by this operation.
+        attempt: attempt (int) used by this operation.
+
+    Returns:
+        str value produced by canonical benchmark run ID.
+    """
     return f"gha-{workflow_run_id}-{attempt}"
 
 
 def parse_json_object(body: bytes, label: str) -> dict[str, object]:
+    """Parse jSON object.
+
+
+    Args:
+        body: body (bytes) used by this operation.
+        label: label (str) used by this operation.
+
+    Returns:
+        dict[str, object] value produced by parse JSON object.
+
+    Raises:
+        SystemExit or ValueError when input validation fails.
+    """
     try:
         payload = json.loads(body.decode("utf-8") if body else "{}")
     except json.JSONDecodeError as exc:
@@ -518,6 +780,15 @@ def parse_json_object(body: bytes, label: str) -> dict[str, object]:
 
 
 def created_at_or_none(value: object) -> datetime | None:
+    """Compute created at or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        datetime | None value produced by created at or none.
+    """
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -527,6 +798,15 @@ def created_at_or_none(value: object) -> datetime | None:
 
 
 def int_or_none(value: object) -> int | None:
+    """Compute integer or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        int | None value produced by integer or none.
+    """
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, int):
@@ -537,11 +817,30 @@ def int_or_none(value: object) -> int | None:
 
 
 def string_or_default(value: object, default: str = "") -> str:
+    """Compute string or default.
+
+
+    Args:
+        value: value (object) used by this operation.
+        default: default (str) used by this operation.
+
+    Returns:
+        str value produced by string or default.
+    """
     rendered = string_or_none(value)
     return rendered if rendered is not None else default
 
 
 def string_or_none(value: object) -> str | None:
+    """Compute string or none.
+
+
+    Args:
+        value: value (object) used by this operation.
+
+    Returns:
+        str | None value produced by string or none.
+    """
     if value is None:
         return None
     rendered = str(value).strip()
@@ -549,6 +848,16 @@ def string_or_none(value: object) -> str | None:
 
 
 def error_from_response(response: HttpResponse, prefix: str) -> GitHubActionsAdapterError:
+    """Compute error from response.
+
+
+    Args:
+        response: response (HttpResponse) used by this operation.
+        prefix: prefix (str) used by this operation.
+
+    Returns:
+        GitHubActionsAdapterError value produced by error from response.
+    """
     message = github_error_message(response.body)
     if is_rate_limited(response):
         detail = "GitHub API rate limit exceeded"
@@ -567,6 +876,15 @@ def error_from_response(response: HttpResponse, prefix: str) -> GitHubActionsAda
 
 
 def github_error_message(body: bytes) -> str | None:
+    """Compute GitHub error message.
+
+
+    Args:
+        body: body (bytes) used by this operation.
+
+    Returns:
+        str | None value produced by GitHub error message.
+    """
     try:
         payload = json.loads(body.decode("utf-8") if body else "{}")
     except json.JSONDecodeError:
@@ -577,13 +895,14 @@ def github_error_message(body: bytes) -> str | None:
 
 
 def is_rate_limited(response: HttpResponse) -> bool:
+    """Compute is rate limited.
+
+
+    Args:
+        response: response (HttpResponse) used by this operation.
+
+    Returns:
+        bool value produced by is rate limited.
+    """
     headers = {key.lower(): value for key, value in (response.headers or {}).items()}
     return response.status == 403 and headers.get("x-ratelimit-remaining") == "0"
-
-
-def first_env(values: dict[str, str], *names: str) -> str:
-    for name in names:
-        value = values.get(name, "").strip()
-        if value:
-            return value
-    return ""
